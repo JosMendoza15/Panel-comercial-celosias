@@ -110,12 +110,28 @@ const fmtNum = (n, d = 0) => (isFinite(n) ? n : 0).toLocaleString("es-MX", { max
 
 const fmtDate = (iso) => {
   if (!iso) return "—";
-  const d = new Date(iso + "T00:00:00");
+  const d = new Date(iso.slice(0, 10) + "T00:00:00");
   if (isNaN(d)) return iso;
   return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" });
 };
 
+const fmtDateTime = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso.length > 10 ? iso : iso + "T00:00");
+  if (isNaN(d)) return iso;
+  const soloFecha = iso.length <= 10;
+  return d.toLocaleString("es-MX", soloFecha
+    ? { day: "2-digit", month: "short", year: "numeric" }
+    : { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+};
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const nowLocalISO = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 const monthKeyOf = (iso) => (iso ? iso.slice(0, 7) : "");
 
@@ -620,7 +636,7 @@ function CatalogSection({ title, icon: Icon, items, usageCount, onAdd, onRemove 
 
 function KanbanCard({ v, onEdit, onDragStart }) {
   const total = Number(v.totalCobrado) || 0;
-  const vencido = v.proximoSeguimiento && v.proximoSeguimiento <= todayISO();
+  const vencido = v.proximoSeguimiento && v.proximoSeguimiento <= nowLocalISO();
   return (
     <div
       draggable
@@ -639,7 +655,7 @@ function KanbanCard({ v, onEdit, onDragStart }) {
       </div>
       {v.proximoSeguimiento && (
         <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 6, fontSize: 10.5, color: vencido ? BAD : MUTED, fontWeight: vencido ? 700 : 500 }}>
-          <CalendarClock size={11} /> {fmtDate(v.proximoSeguimiento)}{v.notaSeguimiento ? ` · ${v.notaSeguimiento}` : ""}
+          <CalendarClock size={11} /> {fmtDateTime(v.proximoSeguimiento)}{v.notaSeguimiento ? ` · ${v.notaSeguimiento}` : ""}
         </div>
       )}
     </div>
@@ -888,7 +904,7 @@ function SaleModal({ initial, onClose, onSave, catalogos, clientesConocidos = []
           <Field label={esTemprana ? "Fecha estimada de cobro (opcional)" : "Fecha estimada de cobro"}><TextInput type="date" value={form.fechaEstimadaCobro} onChange={set("fechaEstimadaCobro")} /></Field>
           <Field label="Fecha real de cobro"><TextInput type="date" value={form.fechaRealCobro} onChange={set("fechaRealCobro")} /></Field>
 
-          <Field label="Próximo seguimiento (recordatorio)"><TextInput type="date" value={form.proximoSeguimiento} onChange={set("proximoSeguimiento")} /></Field>
+          <Field label="Próximo seguimiento (recordatorio)"><TextInput type="datetime-local" value={form.proximoSeguimiento} onChange={set("proximoSeguimiento")} /></Field>
           <Field label="¿Qué hay que hacer?"><TextInput placeholder="Ej. Llamarle para confirmar precio" value={form.notaSeguimiento} onChange={set("notaSeguimiento")} /></Field>
 
           <Field label="Observaciones" span={2}>
@@ -1148,35 +1164,36 @@ function crmSeedData() {
     d.setDate(d.getDate() + offsetDays);
     return d.toISOString().slice(0, 10);
   };
+  const isoHora = (offsetDays, hora) => `${iso(offsetDays)}T${String(hora).padStart(2, "0")}:00`;
   return [
     {
       id: uid(), cliente: "Karla Solís", empresa: "", ciudad: "Mérida", telefono: "9991110022",
       valorEstimado: 65000, fechaUltimoContacto: iso(-2), proximaAccion: "Elaborar cotización",
-      fechaProximaAccion: iso(0), prioridad: "Alta", notas: "Quiere celosía para fachada, ya mandó medidas.",
+      fechaProximaAccion: isoHora(0, 16), prioridad: "Alta", notas: "Quiere celosía para fachada, ya mandó medidas.",
       etapa: "Oportunidad", creadoEn: iso(-2),
     },
     {
       id: uid(), cliente: "Iván Chan", empresa: "Chan Arquitectos", ciudad: "Cancún", telefono: "9982223344",
       valorEstimado: 180000, fechaUltimoContacto: iso(-5), proximaAccion: "Dar seguimiento",
-      fechaProximaAccion: iso(-1), prioridad: "Alta", notas: "Proyecto de fraccionamiento, esperando aprobación de presupuesto.",
+      fechaProximaAccion: isoHora(-1, 11), prioridad: "Alta", notas: "Proyecto de fraccionamiento, esperando aprobación de presupuesto.",
       etapa: "Cotización enviada", creadoEn: iso(-9),
     },
     {
       id: uid(), cliente: "Paola Briceño", empresa: "", ciudad: "Playa del Carmen", telefono: "9843335566",
       valorEstimado: 42000, fechaUltimoContacto: iso(-12), proximaAccion: "Llamar al cliente",
-      fechaProximaAccion: iso(-3), prioridad: "Media", notas: "Se enfrió después de la cotización, hay que retomar.",
+      fechaProximaAccion: isoHora(-3, 9), prioridad: "Media", notas: "Se enfrió después de la cotización, hay que retomar.",
       etapa: "Seguimiento", creadoEn: iso(-18),
     },
     {
       id: uid(), cliente: "Grupo Osorno", empresa: "Constructora Osorno", ciudad: "Campeche", telefono: "9814445577",
       valorEstimado: 310000, fechaUltimoContacto: iso(-1), proximaAccion: "Negociar",
-      fechaProximaAccion: iso(1), prioridad: "Alta", notas: "Piden descuento por volumen, esperando autorización.",
+      fechaProximaAccion: isoHora(1, 12), prioridad: "Alta", notas: "Piden descuento por volumen, esperando autorización.",
       etapa: "Negociación", creadoEn: iso(-14),
     },
     {
       id: uid(), cliente: "Rodrigo Balam", empresa: "", ciudad: "Valladolid", telefono: "9857778899",
       valorEstimado: 28000, fechaUltimoContacto: iso(-20), proximaAccion: "Dar seguimiento",
-      fechaProximaAccion: iso(-8), prioridad: "Baja", notas: "No contestó las últimas 2 llamadas.",
+      fechaProximaAccion: isoHora(-8, 10), prioridad: "Baja", notas: "No contestó las últimas 2 llamadas.",
       etapa: "Inactivo / Perdido", creadoEn: iso(-30),
     },
   ];
@@ -1191,7 +1208,7 @@ const emptyOpportunity = (acciones) => ({
   valorEstimado: "",
   fechaUltimoContacto: todayISO(),
   proximaAccion: acciones[0] || "",
-  fechaProximaAccion: todayISO(),
+  fechaProximaAccion: nowLocalISO(),
   prioridad: "Media",
   notas: "",
   etapa: "Oportunidad",
@@ -1273,7 +1290,7 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
               </div>
             )}
           </Field>
-          <Field label="Fecha de la próxima acción"><TextInput type="date" value={form.fechaProximaAccion} onChange={set("fechaProximaAccion")} /></Field>
+          <Field label="Fecha y hora de la próxima acción"><TextInput type="datetime-local" value={form.fechaProximaAccion} onChange={set("fechaProximaAccion")} /></Field>
 
           <Field label="Notas" span={2}>
             <TextArea placeholder="Contexto de la oportunidad, lo que ya se habló, condiciones…" value={form.notas} onChange={set("notas")} />
@@ -1311,8 +1328,8 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
 }
 
 function CRMCard({ op, onEdit, onDragStart }) {
-  const vencida = op.fechaProximaAccion && op.fechaProximaAccion < todayISO();
-  const esHoy = op.fechaProximaAccion === todayISO();
+  const vencida = op.fechaProximaAccion && op.fechaProximaAccion < nowLocalISO();
+  const esHoy = op.fechaProximaAccion && op.fechaProximaAccion.slice(0, 10) === todayISO() && !vencida;
   const valor = Number(op.valorEstimado) || 0;
   return (
     <div
@@ -1350,7 +1367,7 @@ function CRMCard({ op, onEdit, onDragStart }) {
         color: vencida ? BAD : esHoy ? WARN : MUTED, fontWeight: vencida || esHoy ? 700 : 500,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <CalendarClock size={11} /> {fmtDate(op.fechaProximaAccion)}
+          <CalendarClock size={11} /> {fmtDateTime(op.fechaProximaAccion)}
         </div>
         <div style={{ marginTop: 1 }}>{op.proximaAccion}</div>
       </div>
@@ -1571,7 +1588,7 @@ export default function App() {
   const crmActivas = useMemo(() => oportunidades.filter((o) => o.etapa !== "Inactivo / Perdido"), [oportunidades]);
 
   const crmContactarHoy = useMemo(
-    () => crmActivas.filter((o) => o.fechaProximaAccion && o.fechaProximaAccion <= todayISO()),
+    () => crmActivas.filter((o) => o.fechaProximaAccion && o.fechaProximaAccion.slice(0, 10) <= todayISO()),
     [crmActivas]
   );
   const crmNegociacionesAbiertas = useMemo(() => oportunidades.filter((o) => o.etapa === "Negociación").length, [oportunidades]);
@@ -1584,10 +1601,14 @@ export default function App() {
   }, [crmActivas]);
 
   const crmRecordatorios = useMemo(() => {
+    const ahora = nowLocalISO();
+    const hoyDate = todayISO();
     const atrasadas = crmActivas
-      .filter((o) => o.fechaProximaAccion && o.fechaProximaAccion < todayISO())
+      .filter((o) => o.fechaProximaAccion && o.fechaProximaAccion < ahora)
       .sort((a, b) => (a.fechaProximaAccion < b.fechaProximaAccion ? -1 : 1));
-    const hoy = crmActivas.filter((o) => o.fechaProximaAccion === todayISO());
+    const hoy = crmActivas
+      .filter((o) => o.fechaProximaAccion && o.fechaProximaAccion.slice(0, 10) === hoyDate && o.fechaProximaAccion >= ahora)
+      .sort((a, b) => (a.fechaProximaAccion < b.fechaProximaAccion ? -1 : 1));
     return { atrasadas, hoy };
   }, [crmActivas]);
 
@@ -1773,12 +1794,12 @@ export default function App() {
     if (tierSiguiente && faltanteSiguiente > 0 && faltanteSiguiente <= 30000) {
       list.push({ tipo: "nivel", icon: TrendingUp, color: ACCENT, texto: `Te faltan ${fmtMoney(faltanteSiguiente)} para subir al nivel de ${tierSiguiente.pct.toFixed(2)}%.` });
     }
-    const recordatoriosHoy = ventas.filter((v) => v.proximoSeguimiento && v.proximoSeguimiento <= todayISO() && !["Cobrado", "Entregado"].includes(v.etapa));
+    const recordatoriosHoy = ventas.filter((v) => v.proximoSeguimiento && v.proximoSeguimiento <= nowLocalISO() && !["Cobrado", "Entregado"].includes(v.etapa));
     if (recordatoriosHoy.length) {
       recordatoriosHoy.slice(0, 5).forEach((v) => {
         list.push({
           tipo: "recordatorio", icon: CalendarClock, color: ACCENT,
-          texto: `${v.cliente}${v.notaSeguimiento ? ` — ${v.notaSeguimiento}` : " — Dar seguimiento"} (programado ${fmtDate(v.proximoSeguimiento)}, pedido ${v.numeroPedido}).`,
+          texto: `${v.cliente}${v.notaSeguimiento ? ` — ${v.notaSeguimiento}` : " — Dar seguimiento"} (programado ${fmtDateTime(v.proximoSeguimiento)}, pedido ${v.numeroPedido}).`,
         });
       });
       if (recordatoriosHoy.length > 5) {
@@ -2210,7 +2231,7 @@ export default function App() {
                           <AlertTriangle size={16} color={BAD} />
                         </div>
                         <div style={{ fontSize: 13 }}>
-                          <b>{o.cliente}</b> — {o.proximaAccion} <span style={{ color: MUTED }}>(era para {fmtDate(o.fechaProximaAccion)})</span>
+                          <b>{o.cliente}</b> — {o.proximaAccion} <span style={{ color: MUTED }}>(era para {fmtDateTime(o.fechaProximaAccion)})</span>
                         </div>
                       </Card>
                     ))}
@@ -2226,7 +2247,7 @@ export default function App() {
                           <CalendarClock size={16} color={WARN} />
                         </div>
                         <div style={{ fontSize: 13 }}>
-                          <b>{o.cliente}</b> — {o.proximaAccion}
+                          <b>{o.cliente}</b> — {o.proximaAccion} <span style={{ color: MUTED }}>({fmtDateTime(o.fechaProximaAccion)})</span>
                         </div>
                       </Card>
                     ))}
