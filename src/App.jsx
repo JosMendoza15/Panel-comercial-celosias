@@ -285,9 +285,15 @@ async function supaDeleteRow(table, id) {
 }
 
 async function supaReplaceTable(table, rows) {
-  // Borra todo lo del usuario (RLS limita a sus propias filas) y vuelve a insertar.
-  await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=neq.__none__`, { method: "DELETE", headers: supaHeaders() });
+  // Primero se sube/actualiza lo nuevo (si esto falla, no se pierde nada de lo que ya había).
   if (rows.length) await supaUpsert(table, rows);
+  // Solo después se borran en Supabase las filas que ya no existen en "rows" (p. ej. las que se eliminaron en la app).
+  const idsActuales = rows.map((r) => r.id);
+  const existentes = await supaSelect(table).catch(() => []);
+  const aBorrar = existentes.filter((r) => !idsActuales.includes(r.id));
+  for (const r of aBorrar) {
+    await supaDeleteRow(table, r.id).catch((e) => console.error(`No se pudo borrar fila obsoleta en ${table}`, e));
+  }
 }
 
 function ventaToRow(v) {
