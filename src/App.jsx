@@ -1435,6 +1435,8 @@ export default function App() {
   const [crmModal, setCrmModal] = useState(null); // { mode: 'new'|'edit', data }
   const [crmConfirmDelete, setCrmConfirmDelete] = useState(null);
   const [crmView, setCrmView] = useState("tablero"); // 'tablero' | 'panel' | 'recordatorios'
+  const [searchCRM, setSearchCRM] = useState("");
+  const [searchClientes, setSearchClientes] = useState("");
 
   const [reportFilters, setReportFilters] = useState({
     mes: "", anio: "", cliente: "", modelo: "", estado: "", ciudad: "", tipoEnvio: "", etapa: "",
@@ -1586,6 +1588,14 @@ export default function App() {
   /* ---------- Derivados del CRM ---------- */
 
   const crmActivas = useMemo(() => oportunidades.filter((o) => o.etapa !== "Inactivo / Perdido"), [oportunidades]);
+
+  const oportunidadesFiltradas = useMemo(() => {
+    if (!searchCRM.trim()) return oportunidades;
+    const q = searchCRM.toLowerCase();
+    return oportunidades.filter((o) =>
+      [o.cliente, o.empresa, o.telefono, o.ciudad].some((f) => (f || "").toLowerCase().includes(q))
+    );
+  }, [oportunidades, searchCRM]);
 
   const crmContactarHoy = useMemo(
     () => crmActivas.filter((o) => o.fechaProximaAccion && o.fechaProximaAccion.slice(0, 10) <= todayISO()),
@@ -2162,30 +2172,49 @@ export default function App() {
         {tab === "crm" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-              <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
-                {[
-                  { id: "tablero", label: "Tablero" },
-                  { id: "panel", label: "Panel" },
-                  { id: "recordatorios", label: "Recordatorios", badge: crmRecordatorios.atrasadas.length + crmRecordatorios.hoy.length },
-                ].map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => setCrmView(v.id)}
-                    style={{
-                      border: "none", cursor: "pointer", borderRadius: 7, padding: "6px 12px", fontSize: 12.5, fontWeight: 600,
-                      background: crmView === v.id ? "#fff" : "transparent", color: crmView === v.id ? NAVY : MUTED,
-                      boxShadow: crmView === v.id ? "0 1px 2px rgba(14,42,71,0.1)" : "none", display: "flex", alignItems: "center", gap: 6,
-                    }}
-                  >
-                    {v.label}
-                    {!!v.badge && (
-                      <span style={{ background: BAD, color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 800, padding: "1px 6px" }}>{v.badge}</span>
-                    )}
-                  </button>
-                ))}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
+                  {[
+                    { id: "tablero", label: "Tablero" },
+                    { id: "panel", label: "Panel" },
+                    { id: "recordatorios", label: "Recordatorios", badge: crmRecordatorios.atrasadas.length + crmRecordatorios.hoy.length },
+                  ].map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => setCrmView(v.id)}
+                      style={{
+                        border: "none", cursor: "pointer", borderRadius: 7, padding: "6px 12px", fontSize: 12.5, fontWeight: 600,
+                        background: crmView === v.id ? "#fff" : "transparent", color: crmView === v.id ? NAVY : MUTED,
+                        boxShadow: crmView === v.id ? "0 1px 2px rgba(14,42,71,0.1)" : "none", display: "flex", alignItems: "center", gap: 6,
+                      }}
+                    >
+                      {v.label}
+                      {!!v.badge && (
+                        <span style={{ background: BAD, color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 800, padding: "1px 6px" }}>{v.badge}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ position: "relative", width: 240 }}>
+                  <Search size={14} style={{ position: "absolute", left: 9, top: 9, color: MUTED }} />
+                  <TextInput
+                    placeholder="Buscar contacto, empresa, tel, ciudad…"
+                    value={searchCRM}
+                    onChange={(e) => setSearchCRM(e.target.value)}
+                    style={{ paddingLeft: 30, fontSize: 12.5 }}
+                  />
+                </div>
               </div>
               <Button icon={Plus} onClick={() => setCrmModal({ mode: "new" })}>Nueva oportunidad</Button>
             </div>
+
+            {searchCRM.trim() && (
+              <div style={{ fontSize: 12, color: MUTED }}>
+                {oportunidadesFiltradas.length
+                  ? `${oportunidadesFiltradas.length} contacto(s) encontrado(s) para "${searchCRM}".`
+                  : `No hay ningún contacto registrado con "${searchCRM}" — puedes darlo de alta con "Nueva oportunidad".`}
+              </div>
+            )}
 
             {loadingCRM ? (
               <div style={{ padding: 40, textAlign: "center", color: MUTED, fontSize: 13 }}>Cargando CRM…</div>
@@ -2194,7 +2223,7 @@ export default function App() {
                 <div style={{ fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 5 }}>
                   <Layers size={13} /> Solo oportunidades calificadas. Arrastra una tarjeta para cambiarla de etapa, o haz clic para editarla.
                 </div>
-                <CRMKanbanBoard oportunidades={oportunidades} onStageChange={crmChangeStage} onEdit={(o) => setCrmModal({ mode: "edit", data: o })} />
+                <CRMKanbanBoard oportunidades={oportunidadesFiltradas} onStageChange={crmChangeStage} onEdit={(o) => setCrmModal({ mode: "edit", data: o })} />
               </>
             ) : crmView === "panel" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2388,6 +2417,18 @@ export default function App() {
         )}
 
         {tab === "clientes" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ position: "relative", width: 280 }}>
+              <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: MUTED }} />
+              <TextInput placeholder="Buscar cliente, empresa, teléfono…" value={searchClientes} onChange={(e) => setSearchClientes(e.target.value)} style={{ paddingLeft: 32 }} />
+            </div>
+            {searchClientes.trim() && (
+              <div style={{ fontSize: 12, color: MUTED }}>
+                {clientesAgg.filter((c) => [c.cliente, c.empresa, c.telefono].some((f) => (f || "").toLowerCase().includes(searchClientes.toLowerCase()))).length
+                  ? null
+                  : `Ningún cliente registrado con "${searchClientes}".`}
+              </div>
+            )}
           <Card style={{ overflow: "hidden" }}>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -2399,7 +2440,9 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {clientesAgg.map((c, i) => (
+                  {clientesAgg
+                    .filter((c) => !searchClientes.trim() || [c.cliente, c.empresa, c.telefono].some((f) => (f || "").toLowerCase().includes(searchClientes.toLowerCase())))
+                    .map((c, i) => (
                     <tr key={c.cliente} style={{ borderTop: `1px solid ${LINE}` }}>
                       <td style={{ padding: "10px 12px", fontWeight: 600 }}>
                         {i === 0 && <Pill color={GOOD} bg={`${GOOD}18`} style={{ marginRight: 6 }}>Top</Pill>}
@@ -2420,6 +2463,7 @@ export default function App() {
               {!clientesAgg.length && <EmptyState icon={Users} title="Sin clientes registrados aún" />}
             </div>
           </Card>
+          </div>
         )}
 
         {tab === "modelos" && (
