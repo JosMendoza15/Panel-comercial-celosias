@@ -5,7 +5,7 @@ import {
   TrendingUp, Target, Wallet, Receipt, Package, Ruler, Users2, ShoppingCart,
   ArrowUpRight, ArrowDownRight, Clock, MapPin, Truck, Phone, Mail, Building2,
   CheckCircle2, AlertTriangle, CalendarClock, Sparkles, FileSpreadsheet, Printer,
-  Layers, Palette, Wrench, Droplet, CreditCard, FileText
+  Layers, Palette, Wrench, Droplet, CreditCard, FileText, RefreshCw
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -242,6 +242,12 @@ async function loadCachedSession() {
   } catch (e) { return null; }
 }
 
+// El componente App conecta esto a un estado visible, para que los errores de sync ya no sean silenciosos.
+let onSyncError = null;
+let onSyncOk = null;
+function reportSyncError(msg) { if (onSyncError) onSyncError(msg); }
+function reportSyncOk() { if (onSyncOk) onSyncOk(); }
+
 async function supaLogin(email, password) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -253,6 +259,24 @@ async function supaLogin(email, password) {
   return { access_token: data.access_token, refresh_token: data.refresh_token, email };
 }
 
+async function supaRefreshToken() {
+  if (!currentSession || !currentSession.refresh_token) return false;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: currentSession.refresh_token }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.access_token) return false;
+    currentSession = { access_token: data.access_token, refresh_token: data.refresh_token, email: currentSession.email };
+    await cacheSession(currentSession);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function supaHeaders(extra = {}) {
   return {
     apikey: SUPABASE_ANON_KEY,
@@ -262,26 +286,57 @@ function supaHeaders(extra = {}) {
   };
 }
 
+async function supaFetch(url, options = {}, isRetry = false) {
+  const res = await fetch(url, { ...options, headers: supaHeaders(options.headers) });
+  if (res.status === 401 && currentSession && !isRetry) {
+    const refreshed = await supaRefreshToken();
+    if (refreshed) return supaFetch(url, options, true);
+  }
+  return res;
+}
+
+async function extractError(res, fallback) {
+  try {
+    const data = await res.json();
+    return data.message || data.error_description || data.hint || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
 async function supaSelect(table) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`, { headers: supaHeaders() });
-  if (!res.ok) throw new Error(`No se pudo leer "${table}" de Supabase (${res.status})`);
+  const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}?select=*`);
+  if (!res.ok) {
+    const msg = await extractError(res, `No se pudo leer "${table}" (${res.status})`);
+    reportSyncError(msg);
+    throw new Error(msg);
+  }
+  reportSyncOk();
   return res.json();
 }
 
 async function supaUpsert(table, rows) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+  const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST",
-    headers: supaHeaders({ Prefer: "resolution=merge-duplicates,return=minimal" }),
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify(Array.isArray(rows) ? rows : [rows]),
   });
-  if (!res.ok) throw new Error(`No se pudo guardar en "${table}" (${res.status})`);
+  if (!res.ok) {
+    const msg = await extractError(res, `No se pudo guardar en "${table}" (${res.status})`);
+    reportSyncError(msg);
+    throw new Error(msg);
+  }
+  reportSyncOk();
 }
 
 async function supaDeleteRow(table, id) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, {
-    method: "DELETE", headers: supaHeaders(),
-  });
-  if (!res.ok) throw new Error(`No se pudo borrar en "${table}" (${res.status})`);
+  const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) {
+    const msg = await extractError(res, `No se pudo borrar en "${table}" (${res.status})`);
+    reportSyncError(msg);
+    throw new Error(msg);
+  }
+  reportSyncOk();
 }
 
 async function supaReplaceTable(table, rows) {
@@ -401,7 +456,7 @@ async function saveToStorage(ventas) {
 async function loadCatalogos() {
   if (currentSession) {
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?key=eq.catalogos&select=value`, { headers: supaHeaders() });
+      const res = await supaFetch(`${SUPABASE_URL}/rest/v1/app_config?key=eq.catalogos&select=value`);
       if (res.ok) {
         const rows = await res.json();
         if (rows.length) {
@@ -1129,7 +1184,7 @@ async function saveCRMOportunidades(data) {
 async function loadCRMAcciones() {
   if (currentSession) {
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_config?key=eq.crm_acciones&select=value`, { headers: supaHeaders() });
+      const res = await supaFetch(`${SUPABASE_URL}/rest/v1/app_config?key=eq.crm_acciones&select=value`);
       if (res.ok) {
         const rows = await res.json();
         if (rows.length) {
@@ -1452,6 +1507,20 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
+  const [syncError, setSyncError] = useState(null);
+  const [syncOk, setSyncOk] = useState(false);
+
+  useEffect(() => {
+    onSyncError = (msg) => { setSyncError(msg); setSyncOk(false); };
+    onSyncOk = () => setSyncOk(true);
+    return () => { onSyncError = null; onSyncOk = null; };
+  }, []);
+
+  useEffect(() => {
+    if (!syncOk) return;
+    const t = setTimeout(() => setSyncOk(false), 2500);
+    return () => clearTimeout(t);
+  }, [syncOk]);
 
   const reloadVentasYCatalogos = useCallback(async () => {
     setLoading(true);
@@ -1525,6 +1594,19 @@ export default function App() {
     currentSession = null;
     setSession(null);
     await cacheSession(null);
+  };
+
+  const [syncingNow, setSyncingNow] = useState(false);
+  const handleSyncNow = async () => {
+    setSyncingNow(true);
+    setSyncError(null);
+    await Promise.all([
+      saveToStorage(ventas),
+      saveCatalogos(catalogos),
+      saveCRMOportunidades(oportunidades),
+      saveCRMAcciones(accionesCRM),
+    ]);
+    setSyncingNow(false);
   };
 
   const addCatalogItem = (key, value) => {
@@ -1963,6 +2045,8 @@ export default function App() {
         * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: #C7D2DE; border-radius: 8px; }
+        .spin { animation: spin-rotate 0.8s linear infinite; }
+        @keyframes spin-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
 
       {/* HEADER */}
@@ -1985,13 +2069,28 @@ export default function App() {
           </div>
           <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {session ? (
-              <span
-                onClick={handleLogout}
-                title="Cerrar sesión"
-                style={{ color: "rgba(255,255,255,0.8)", fontSize: 11.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
-              >
-                ☁ {session.email} · salir
-              </span>
+              <>
+                <button
+                  onClick={handleSyncNow}
+                  disabled={syncingNow}
+                  title="Forzar sincronización con la nube ahora"
+                  style={{
+                    border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#fff",
+                    borderRadius: 8, padding: "5px 9px", fontSize: 11.5, cursor: syncingNow ? "default" : "pointer",
+                    display: "flex", alignItems: "center", gap: 5, opacity: syncingNow ? 0.6 : 1,
+                  }}
+                >
+                  <RefreshCw size={12} className={syncingNow ? "spin" : ""} />
+                  {syncingNow ? "Sincronizando…" : "Sincronizar ahora"}
+                </button>
+                <span
+                  onClick={handleLogout}
+                  title="Cerrar sesión"
+                  style={{ color: "rgba(255,255,255,0.8)", fontSize: 11.5, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}
+                >
+                  ☁ {session.email} · salir
+                </span>
+              </>
             ) : (
               <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 11.5 }}>Sin conexión (solo este chat)</span>
             )}
@@ -2032,6 +2131,19 @@ export default function App() {
           })}
         </div>
       </div>
+
+      {syncError && (
+        <div className="no-print" style={{ background: `${BAD}12`, borderBottom: `1px solid ${BAD}33`, padding: "8px 20px", display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: BAD }}>
+          <AlertTriangle size={15} />
+          <span style={{ flex: 1 }}>No se pudo sincronizar con la nube: {syncError}. Tus cambios se guardaron aquí en este dispositivo, pero no en Supabase todavía.</span>
+          <button onClick={() => setSyncError(null)} style={{ border: "none", background: "transparent", cursor: "pointer", color: BAD }}><X size={15} /></button>
+        </div>
+      )}
+      {syncOk && !syncError && (
+        <div className="no-print" style={{ background: `${GOOD}12`, borderBottom: `1px solid ${GOOD}33`, padding: "6px 20px", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: GOOD }}>
+          <CheckCircle2 size={13} /> Sincronizado con la nube.
+        </div>
+      )}
 
       {/* BODY */}
       <div style={{ padding: 20, flex: 1, overflowY: "auto" }} className="print-area">
