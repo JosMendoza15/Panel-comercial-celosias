@@ -133,6 +133,13 @@ const nowLocalISO = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
+const addDaysLocalISO = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 const monthKeyOf = (iso) => (iso ? iso.slice(0, 7) : "");
 
 const calcSubtotalIVA = (total) => {
@@ -381,7 +388,7 @@ function oportunidadToRow(o) {
     id: o.id, cliente: o.cliente, empresa: o.empresa, ciudad: o.ciudad, telefono: o.telefono,
     valor_estimado: o.valorEstimado, fecha_ultimo_contacto: o.fechaUltimoContacto || null,
     proxima_accion: o.proximaAccion, fecha_proxima_accion: o.fechaProximaAccion || null,
-    prioridad: o.prioridad, notas: o.notas, etapa: o.etapa,
+    prioridad: o.prioridad, notas: o.notas, etapa: o.etapa, seguimientos: o.seguimientos || [],
   };
 }
 function rowToOportunidad(r) {
@@ -390,6 +397,7 @@ function rowToOportunidad(r) {
     valorEstimado: r.valor_estimado, fechaUltimoContacto: r.fecha_ultimo_contacto,
     proximaAccion: r.proxima_accion, fechaProximaAccion: r.fecha_proxima_accion,
     prioridad: r.prioridad, notas: r.notas, etapa: r.etapa, creadoEn: r.creado_en,
+    seguimientos: r.seguimientos || [],
   };
 }
 
@@ -1231,31 +1239,40 @@ function crmSeedData() {
       id: uid(), cliente: "Karla Solís", empresa: "", ciudad: "Mérida", telefono: "9991110022",
       valorEstimado: 65000, fechaUltimoContacto: iso(-2), proximaAccion: "Elaborar cotización",
       fechaProximaAccion: isoHora(0, 16), prioridad: "Alta", notas: "Quiere celosía para fachada, ya mandó medidas.",
-      etapa: "Oportunidad", creadoEn: iso(-2),
+      etapa: "Oportunidad", creadoEn: iso(-2), seguimientos: [],
     },
     {
       id: uid(), cliente: "Iván Chan", empresa: "Chan Arquitectos", ciudad: "Cancún", telefono: "9982223344",
       valorEstimado: 180000, fechaUltimoContacto: iso(-5), proximaAccion: "Dar seguimiento",
       fechaProximaAccion: isoHora(-1, 11), prioridad: "Alta", notas: "Proyecto de fraccionamiento, esperando aprobación de presupuesto.",
       etapa: "Cotización enviada", creadoEn: iso(-9),
+      seguimientos: [
+        { id: uid(), fecha: isoHora(-9, 10), nota: "Primer contacto, se envió catálogo." },
+        { id: uid(), fecha: isoHora(-5, 12), nota: "Confirmó que le interesa, va a revisar presupuesto." },
+      ],
     },
     {
       id: uid(), cliente: "Paola Briceño", empresa: "", ciudad: "Playa del Carmen", telefono: "9843335566",
       valorEstimado: 42000, fechaUltimoContacto: iso(-12), proximaAccion: "Llamar al cliente",
       fechaProximaAccion: isoHora(-3, 9), prioridad: "Media", notas: "Se enfrió después de la cotización, hay que retomar.",
       etapa: "Seguimiento", creadoEn: iso(-18),
+      seguimientos: [
+        { id: uid(), fecha: isoHora(-18, 9), nota: "Solicitó cotización." },
+        { id: uid(), fecha: isoHora(-15, 10), nota: "Se envió cotización por correo." },
+        { id: uid(), fecha: isoHora(-12, 16), nota: "No contestó llamada." },
+      ],
     },
     {
       id: uid(), cliente: "Grupo Osorno", empresa: "Constructora Osorno", ciudad: "Campeche", telefono: "9814445577",
       valorEstimado: 310000, fechaUltimoContacto: iso(-1), proximaAccion: "Negociar",
       fechaProximaAccion: isoHora(1, 12), prioridad: "Alta", notas: "Piden descuento por volumen, esperando autorización.",
-      etapa: "Negociación", creadoEn: iso(-14),
+      etapa: "Negociación", creadoEn: iso(-14), seguimientos: [{ id: uid(), fecha: isoHora(-14, 9), nota: "Primer contacto, mandó planos del proyecto." }],
     },
     {
       id: uid(), cliente: "Rodrigo Balam", empresa: "", ciudad: "Valladolid", telefono: "9857778899",
       valorEstimado: 28000, fechaUltimoContacto: iso(-20), proximaAccion: "Dar seguimiento",
       fechaProximaAccion: isoHora(-8, 10), prioridad: "Baja", notas: "No contestó las últimas 2 llamadas.",
-      etapa: "Inactivo / Perdido", creadoEn: iso(-30),
+      etapa: "Inactivo / Perdido", creadoEn: iso(-30), seguimientos: [{ id: uid(), fecha: isoHora(-30, 11), nota: "Primer contacto." }, { id: uid(), fecha: isoHora(-20, 15), nota: "Segundo intento, no contestó." }],
     },
   ];
 }
@@ -1274,6 +1291,7 @@ const emptyOpportunity = (acciones) => ({
   notas: "",
   etapa: "Oportunidad",
   creadoEn: todayISO(),
+  seguimientos: [],
 });
 
 function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddAccion }) {
@@ -1282,12 +1300,39 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
   const [usarPersonalizada, setUsarPersonalizada] = useState(esPersonalizadaInicial);
   const [accionPersonalizada, setAccionPersonalizada] = useState(esPersonalizadaInicial ? initial.proximaAccion : "");
 
+  const [mostrarSeguimiento, setMostrarSeguimiento] = useState(false);
+  const [notaSeguimientoNuevo, setNotaSeguimientoNuevo] = useState("");
+  const [accionSeguimientoNuevo, setAccionSeguimientoNuevo] = useState(form.proximaAccion || acciones[0] || "");
+  const [fechaCustomSeguimiento, setFechaCustomSeguimiento] = useState("");
+  const [mostrarCustom, setMostrarCustom] = useState(false);
+
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
     setForm((f) => ({ ...f, [k]: val }));
   };
 
   const canSave = form.cliente.trim() && (!usarPersonalizada || accionPersonalizada.trim());
+
+  const registrarSeguimiento = (opcion) => {
+    const ahora = nowLocalISO();
+    const nuevoSeg = { id: uid(), fecha: ahora, nota: notaSeguimientoNuevo.trim() };
+    let nuevaFechaAccion;
+    if (opcion === "manana") nuevaFechaAccion = addDaysLocalISO(1);
+    else if (opcion === "3dias") nuevaFechaAccion = addDaysLocalISO(3);
+    else if (opcion === "1semana") nuevaFechaAccion = addDaysLocalISO(7);
+    else nuevaFechaAccion = fechaCustomSeguimiento || form.fechaProximaAccion;
+
+    const actualizado = {
+      ...form,
+      id: form.id || uid(),
+      seguimientos: [...(form.seguimientos || []), nuevoSeg],
+      fechaUltimoContacto: todayISO(),
+      proximaAccion: accionSeguimientoNuevo || form.proximaAccion,
+      fechaProximaAccion: nuevaFechaAccion,
+      valorEstimado: form.valorEstimado === "" ? 0 : Number(form.valorEstimado),
+    };
+    onSave(actualizado);
+  };
 
   return (
     <div style={{
@@ -1356,6 +1401,59 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
           <Field label="Notas" span={2}>
             <TextArea placeholder="Contexto de la oportunidad, lo que ya se habló, condiciones…" value={form.notas} onChange={set("notas")} />
           </Field>
+
+          {initial && (
+            <div style={{ gridColumn: "span 2", borderTop: `1px solid ${LINE}`, paddingTop: 14, marginTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>
+                  Historial de seguimientos ({(form.seguimientos || []).length})
+                </div>
+                {!mostrarSeguimiento && (
+                  <Button size="sm" icon={Plus} onClick={() => setMostrarSeguimiento(true)}>Registrar seguimiento</Button>
+                )}
+              </div>
+
+              {(form.seguimientos || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: mostrarSeguimiento ? 12 : 0, maxHeight: 140, overflowY: "auto" }}>
+                  {[...(form.seguimientos || [])].reverse().map((s) => (
+                    <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 8 }}>
+                      <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{fmtDateTime(s.fecha)}</span>
+                      <span style={{ color: INK }}>{s.nota || "Seguimiento registrado (sin nota)"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {mostrarSeguimiento && (
+                <div style={{ background: PAPER, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <TextInput
+                    placeholder="¿Qué pasó? (opcional) ej. Le marqué, no contestó"
+                    value={notaSeguimientoNuevo}
+                    onChange={(e) => setNotaSeguimientoNuevo(e.target.value)}
+                  />
+                  <Field label="¿Próxima acción?">
+                    <Select value={accionSeguimientoNuevo} onChange={(e) => setAccionSeguimientoNuevo(e.target.value)}>
+                      {acciones.map((a) => <option key={a}>{a}</option>)}
+                    </Select>
+                  </Field>
+                  <div style={{ fontSize: 11.5, color: MUTED }}>¿Cuándo le vuelvo a dar seguimiento?</div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <Button size="sm" variant="subtle" onClick={() => registrarSeguimiento("manana")}>Mañana</Button>
+                    <Button size="sm" variant="subtle" onClick={() => registrarSeguimiento("3dias")}>En 3 días</Button>
+                    <Button size="sm" variant="subtle" onClick={() => registrarSeguimiento("1semana")}>En 1 semana</Button>
+                    <Button size="sm" variant="subtle" onClick={() => setMostrarCustom((v) => !v)}>Otra fecha</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setMostrarSeguimiento(false); setNotaSeguimientoNuevo(""); setMostrarCustom(false); }}>Cancelar</Button>
+                  </div>
+                  {mostrarCustom && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <TextInput type="datetime-local" value={fechaCustomSeguimiento} onChange={(e) => setFechaCustomSeguimiento(e.target.value)} />
+                      <Button size="sm" disabled={!fechaCustomSeguimiento} onClick={() => registrarSeguimiento("otra")}>Confirmar</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -1392,6 +1490,8 @@ function CRMCard({ op, onEdit, onDragStart }) {
   const vencida = op.fechaProximaAccion && op.fechaProximaAccion < nowLocalISO();
   const esHoy = op.fechaProximaAccion && op.fechaProximaAccion.slice(0, 10) === todayISO() && !vencida;
   const valor = Number(op.valorEstimado) || 0;
+  const numSeg = (op.seguimientos || []).length;
+  const segColor = numSeg === 0 ? MUTED : numSeg <= 2 ? ACCENT : numSeg <= 4 ? WARN : BAD;
   return (
     <div
       draggable
@@ -1400,9 +1500,22 @@ function CRMCard({ op, onEdit, onDragStart }) {
       style={{
         background: "#fff", border: `1px solid ${LINE}`, borderLeft: `3px solid ${CRM_ETAPA_COLOR[op.etapa]}`,
         borderRadius: 9, padding: "9px 10px", cursor: "grab", boxShadow: "0 1px 2px rgba(14,42,71,0.05)",
-        display: "flex", flexDirection: "column", gap: 5,
+        display: "flex", flexDirection: "column", gap: 5, position: "relative",
       }}
     >
+      {numSeg > 0 && (
+        <div
+          title={`${numSeg} seguimiento(s) registrados`}
+          style={{
+            position: "absolute", top: -7, right: -7, width: 20, height: 20, borderRadius: "50%",
+            background: segColor, color: "#fff", fontSize: 10.5, fontWeight: 800,
+            display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid #fff",
+            boxShadow: "0 1px 2px rgba(14,42,71,0.15)",
+          }}
+        >
+          {numSeg}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 12.5, color: INK }}>{op.cliente}</div>
         <Pill color={CRM_PRIORIDAD_COLOR[op.prioridad]} style={{ fontSize: 10, padding: "2px 7px", flexShrink: 0 }}>{op.prioridad}</Pill>
@@ -1709,6 +1822,27 @@ export default function App() {
       .sort((a, b) => (a.fechaProximaAccion < b.fechaProximaAccion ? -1 : 1));
     return { atrasadas, hoy };
   }, [crmActivas]);
+
+  const crmPendientesPorAccion = useMemo(() => {
+    const relevantes = [...crmRecordatorios.atrasadas, ...crmRecordatorios.hoy];
+    const map = {};
+    relevantes.forEach((o) => {
+      const key = o.proximaAccion || "Sin acción definida";
+      if (!map[key]) map[key] = [];
+      map[key].push(o);
+    });
+    return Object.entries(map).sort((a, b) => b[1].length - a[1].length);
+  }, [crmRecordatorios]);
+
+  const crmSaludo = useMemo(() => {
+    const nombreSaludo = "José";
+    const totalPendientes = crmRecordatorios.atrasadas.length + crmRecordatorios.hoy.length;
+    if (!totalPendientes) return `Vas al día, ${nombreSaludo} — ningún pendiente en tu CRM por ahora. 🎉`;
+    const siguiente = crmRecordatorios.atrasadas[0] || crmRecordatorios.hoy[0];
+    const urgencia = crmRecordatorios.atrasadas.length ? "atrasado" : "para hoy";
+    const extra = totalPendientes > 1 ? ` (y ${totalPendientes - 1} más pendiente${totalPendientes - 1 > 1 ? "s" : ""})` : "";
+    return `Oye ${nombreSaludo}, lo más urgente es ${siguiente.cliente}: ${siguiente.proximaAccion} — ${urgencia}${siguiente.fechaProximaAccion ? ` (${fmtDateTime(siguiente.fechaProximaAccion)})` : ""}.${extra}`;
+  }, [crmRecordatorios]);
 
   const persist = useCallback(async (next) => {
     setVentas(next);
@@ -2289,6 +2423,16 @@ export default function App() {
 
         {tab === "crm" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Card style={{
+              padding: "14px 16px", display: "flex", alignItems: "center", gap: 12,
+              background: `linear-gradient(90deg, ${NAVY}0D, ${ACCENT}0D)`, border: `1px solid ${NAVY}22`,
+            }}>
+              <div style={{ width: 34, height: 34, borderRadius: 999, background: NAVY, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Sparkles size={16} color="#fff" />
+              </div>
+              <div style={{ fontSize: 13, color: INK, fontWeight: 600 }}>{crmSaludo}</div>
+            </Card>
+
             <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
@@ -2369,6 +2513,43 @@ export default function App() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>Pendientes por tipo de acción</div>
+                  {crmPendientesPorAccion.length ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                      {crmPendientesPorAccion.map(([accion, items]) => (
+                        <Card key={accion} style={{ padding: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 12.5, color: INK }}>{accion}</div>
+                            <span style={{ marginLeft: "auto", background: NAVY, color: "#fff", borderRadius: 999, fontSize: 10.5, fontWeight: 800, padding: "1px 7px" }}>{items.length}</span>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                            {items.map((o) => {
+                              const atrasada = o.fechaProximaAccion < nowLocalISO() && o.fechaProximaAccion.slice(0, 10) !== todayISO();
+                              return (
+                                <div
+                                  key={o.id}
+                                  onClick={() => setCrmModal({ mode: "edit", data: o })}
+                                  style={{ fontSize: 12, display: "flex", justifyContent: "space-between", gap: 6, cursor: "pointer", padding: "4px 6px", borderRadius: 6 }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.background = PAPER)}
+                                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                                >
+                                  <span>{o.cliente}</span>
+                                  <span style={{ color: atrasada ? BAD : MUTED, fontWeight: atrasada ? 700 : 500, flexShrink: 0 }}>
+                                    {o.fechaProximaAccion.slice(0, 10) === todayISO() ? "hoy" : fmtDate(o.fechaProximaAccion)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12.5, color: MUTED }}>Nada pendiente por tipo de acción ahora mismo.</div>
+                  )}
+                </div>
+
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8, color: BAD }}>Atrasadas ({crmRecordatorios.atrasadas.length})</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
