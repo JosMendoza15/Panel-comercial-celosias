@@ -389,6 +389,7 @@ function oportunidadToRow(o) {
     valor_estimado: o.valorEstimado, fecha_ultimo_contacto: o.fechaUltimoContacto || null,
     proxima_accion: o.proximaAccion, fecha_proxima_accion: o.fechaProximaAccion || null,
     prioridad: o.prioridad, notas: o.notas, etapa: o.etapa, seguimientos: o.seguimientos || [],
+    modelo: o.modelo || "", motivo_perdida: o.motivoPerdida || "",
   };
 }
 function rowToOportunidad(r) {
@@ -397,7 +398,7 @@ function rowToOportunidad(r) {
     valorEstimado: r.valor_estimado, fechaUltimoContacto: r.fecha_ultimo_contacto,
     proximaAccion: r.proxima_accion, fechaProximaAccion: r.fecha_proxima_accion,
     prioridad: r.prioridad, notas: r.notas, etapa: r.etapa, creadoEn: r.creado_en,
-    seguimientos: r.seguimientos || [],
+    seguimientos: r.seguimientos || [], modelo: r.modelo || "", motivoPerdida: r.motivo_perdida || "",
   };
 }
 
@@ -1292,6 +1293,8 @@ const emptyOpportunity = (acciones) => ({
   etapa: "Oportunidad",
   creadoEn: todayISO(),
   seguimientos: [],
+  modelo: "",
+  motivoPerdida: "",
 });
 
 function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddAccion }) {
@@ -1356,18 +1359,26 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
           <Field label="Ciudad"><TextInput placeholder="Ciudad" value={form.ciudad} onChange={set("ciudad")} /></Field>
           <Field label="Teléfono"><TextInput placeholder="999 000 0000" value={form.telefono} onChange={set("telefono")} /></Field>
 
+          <Field label="Modelo / detalle (opcional)"><TextInput placeholder="Ej. C2005, 15 m²" value={form.modelo} onChange={set("modelo")} /></Field>
           <Field label="Valor estimado"><TextInput type="number" min="0" placeholder="0.00" value={form.valorEstimado} onChange={set("valorEstimado")} /></Field>
+
           <Field label="Prioridad">
             <Select value={form.prioridad} onChange={set("prioridad")}>
               {CRM_PRIORIDADES.map((p) => <option key={p}>{p}</option>)}
             </Select>
           </Field>
-
           <Field label="Etapa">
             <Select value={form.etapa} onChange={set("etapa")}>
               {CRM_ETAPAS.map((e) => <option key={e}>{e}</option>)}
             </Select>
           </Field>
+
+          {form.etapa === "Inactivo / Perdido" && (
+            <Field label="Motivo de pérdida" span={2}>
+              <TextInput placeholder="Ej. Precio, se fue con otro proveedor, dejó de contestar…" value={form.motivoPerdida} onChange={set("motivoPerdida")} />
+            </Field>
+          )}
+
           <Field label="Fecha del último contacto"><TextInput type="date" value={form.fechaUltimoContacto} onChange={set("fechaUltimoContacto")} /></Field>
 
           <Field label="Próxima acción">
@@ -1530,9 +1541,10 @@ function CRMCard({ op, onEdit, onDragStart }) {
           <Phone size={11} />{op.telefono}
         </div>
       )}
-      {valor > 0 && (
+      {(valor > 0 || op.modelo) && (
         <div style={{ fontSize: 11.5, fontWeight: 700, color: INK, display: "flex", alignItems: "center", gap: 4 }}>
-          <Wallet size={11} color={MUTED} />{fmtMoney(valor)}
+          <Wallet size={11} color={MUTED} />
+          {op.modelo ? `${op.modelo}${valor > 0 ? " · " : ""}` : ""}{valor > 0 ? fmtMoney(valor) : ""}
         </div>
       )}
       <div style={{
@@ -1555,7 +1567,16 @@ function CRMKanbanBoard({ oportunidades, onStageChange, onEdit }) {
   return (
     <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 6 }}>
       {CRM_ETAPAS.map((etapa) => {
-        const items = oportunidades.filter((o) => o.etapa === etapa);
+        const items = oportunidades
+          .filter((o) => o.etapa === etapa)
+          .sort((a, b) => {
+            const fa = a.fechaProximaAccion || "";
+            const fb = b.fechaProximaAccion || "";
+            if (!fa && !fb) return 0;
+            if (!fa) return -1; // sin fecha programada = urgente, va arriba
+            if (!fb) return 1;
+            return fa < fb ? -1 : fa > fb ? 1 : 0;
+          });
         return (
           <div
             key={etapa}
@@ -1572,10 +1593,17 @@ function CRMKanbanBoard({ oportunidades, onStageChange, onEdit }) {
               display: "flex", flexDirection: "column", maxHeight: "68vh",
             }}
           >
-            <div style={{ padding: "10px 12px", borderBottom: `2px solid ${CRM_ETAPA_COLOR[etapa]}`, display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 999, background: CRM_ETAPA_COLOR[etapa], flexShrink: 0 }} />
-              <span style={{ fontWeight: 700, fontSize: 11.5, color: INK }}>{etapa}</span>
-              <span style={{ marginLeft: "auto", fontSize: 11, color: MUTED, background: "#fff", borderRadius: 999, padding: "1px 7px", border: `1px solid ${LINE}` }}>{items.length}</span>
+            <div style={{ padding: "10px 12px", borderBottom: `2px solid ${CRM_ETAPA_COLOR[etapa]}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: CRM_ETAPA_COLOR[etapa], flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, fontSize: 11.5, color: INK }}>{etapa}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: MUTED, background: "#fff", borderRadius: 999, padding: "1px 7px", border: `1px solid ${LINE}` }}>{items.length}</span>
+              </div>
+              {items.some((o) => Number(o.valorEstimado) > 0) && (
+                <div style={{ fontSize: 10.5, color: MUTED, marginTop: 3, fontWeight: 600 }}>
+                  {fmtMoney(items.reduce((s, o) => s + (Number(o.valorEstimado) || 0), 0))} en juego
+                </div>
+              )}
             </div>
             <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
               {items.map((op) => <CRMCard key={op.id} op={op} onEdit={onEdit} onDragStart={setDragId} />)}
@@ -1833,6 +1861,27 @@ export default function App() {
     });
     return Object.entries(map).sort((a, b) => b[1].length - a[1].length);
   }, [crmRecordatorios]);
+
+  const crmResumenSemanal = useMemo(() => {
+    const inicioSemana = new Date();
+    const dia = inicioSemana.getDay();
+    const diffToMonday = dia === 0 ? 6 : dia - 1;
+    inicioSemana.setDate(inicioSemana.getDate() - diffToMonday);
+    const inicioISO = `${inicioSemana.getFullYear()}-${String(inicioSemana.getMonth() + 1).padStart(2, "0")}-${String(inicioSemana.getDate()).padStart(2, "0")}`;
+    let seguimientos = 0;
+    oportunidades.forEach((o) => {
+      (o.seguimientos || []).forEach((s) => { if (s.fecha && s.fecha.slice(0, 10) >= inicioISO) seguimientos++; });
+    });
+    const nuevas = oportunidades.filter((o) => o.creadoEn && o.creadoEn >= inicioISO).length;
+    return { seguimientos, nuevas };
+  }, [oportunidades]);
+
+  const crmRecuperables = useMemo(() => {
+    const limite = new Date();
+    limite.setDate(limite.getDate() - 60);
+    const limiteISO = limite.toISOString().slice(0, 10);
+    return oportunidades.filter((o) => o.etapa === "Inactivo / Perdido" && (o.fechaUltimoContacto || o.creadoEn || "") <= limiteISO);
+  }, [oportunidades]);
 
   const crmSaludo = useMemo(() => {
     const nombreSaludo = "José";
@@ -2483,7 +2532,7 @@ export default function App() {
             ) : crmView === "tablero" ? (
               <>
                 <div style={{ fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 5 }}>
-                  <Layers size={13} /> Solo oportunidades calificadas. Arrastra una tarjeta para cambiarla de etapa, o haz clic para editarla.
+                  <Layers size={13} /> Cada columna se ordena sola: arriba lo urgente (sin fecha o vencido), abajo lo ya programado. Arrastra una tarjeta para cambiarla de etapa, o haz clic para editarla.
                 </div>
                 <CRMKanbanBoard oportunidades={oportunidadesFiltradas} onStageChange={crmChangeStage} onEdit={(o) => setCrmModal({ mode: "edit", data: o })} />
               </>
@@ -2510,6 +2559,39 @@ export default function App() {
                     })}
                   </div>
                 </Card>
+
+                <Card style={{ padding: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 10 }}>Esta semana</div>
+                  <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: NAVY }}>{crmResumenSemanal.seguimientos}</div>
+                      <div style={{ fontSize: 11.5, color: MUTED }}>seguimientos dados</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: NAVY }}>{crmResumenSemanal.nuevas}</div>
+                      <div style={{ fontSize: 11.5, color: MUTED }}>oportunidades nuevas</div>
+                    </div>
+                  </div>
+                </Card>
+
+                {crmRecuperables.length > 0 && (
+                  <Card style={{ padding: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 4 }}>Vale la pena reintentar</div>
+                    <div style={{ fontSize: 12, color: MUTED, marginBottom: 10 }}>Perdidos hace 60+ días — a veces el que dijo que no, después sí compra.</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {crmRecuperables.map((o) => (
+                        <div
+                          key={o.id}
+                          onClick={() => setCrmModal({ mode: "edit", data: o })}
+                          style={{ fontSize: 12.5, display: "flex", justifyContent: "space-between", gap: 8, cursor: "pointer", padding: "6px 8px", borderRadius: 7, background: PAPER }}
+                        >
+                          <span><b>{o.cliente}</b>{o.motivoPerdida ? ` — ${o.motivoPerdida}` : ""}</span>
+                          <span style={{ color: MUTED, flexShrink: 0 }}>{fmtDate(o.fechaUltimoContacto || o.creadoEn)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
