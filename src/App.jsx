@@ -5,7 +5,7 @@ import {
   TrendingUp, Target, Wallet, Receipt, Package, Ruler, Users2, ShoppingCart,
   ArrowUpRight, ArrowDownRight, Clock, MapPin, Truck, Phone, Mail, Building2,
   CheckCircle2, AlertTriangle, CalendarClock, Sparkles, FileSpreadsheet, Printer,
-  Layers, Palette, Wrench, Droplet, CreditCard, FileText, RefreshCw
+  Layers, Palette, Wrench, Droplet, CreditCard, FileText, RefreshCw, Circle
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -1830,6 +1830,7 @@ export default function App() {
   const [quoteModal, setQuoteModal] = useState(null);
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
   const [search, setSearch] = useState("");
+  const [soloConPago, setSoloConPago] = useState(true);
   const [vistaVentas, setVistaVentas] = useState("tablero");
 
   // --- Estado exclusivo del CRM (independiente de ventas/catalogos) ---
@@ -2425,13 +2426,15 @@ export default function App() {
   /* ---------- Búsqueda tabla ventas ---------- */
 
   const ventasFiltradas = useMemo(() => {
-    if (!search.trim()) return ventas;
+    let base = ventas;
+    if (soloConPago) base = base.filter((v) => getTotalPagado(v) > 0);
+    if (!search.trim()) return base;
     const q = search.toLowerCase();
-    return ventas.filter((v) =>
+    return base.filter((v) =>
       [v.cliente, v.empresa, v.numeroPedido, v.modelo, v.ciudadDestino, v.estadoDestino]
         .some((f) => (f || "").toLowerCase().includes(q))
     );
-  }, [ventas, search]);
+  }, [ventas, search, soloConPago]);
 
   const ventasOrdenadas = useMemo(() => [...ventasFiltradas].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)), [ventasFiltradas]);
 
@@ -3017,6 +3020,18 @@ export default function App() {
                 <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: MUTED }} />
                 <TextInput placeholder="Buscar cliente, pedido, modelo…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
               </div>
+              <button
+                onClick={() => setSoloConPago((v) => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, border: `1px solid ${soloConPago ? ACCENT : LINE}`,
+                  background: soloConPago ? `${ACCENT}12` : "#fff", color: soloConPago ? ACCENT : MUTED,
+                  borderRadius: 9, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                }}
+                title="Muestra solo pedidos con al menos un pago registrado (oculta prospectos, cotizaciones, negociaciones sin depósito)"
+              >
+                {soloConPago ? <CheckCircle2 size={15} /> : <Circle size={15} />}
+                Solo con pago registrado
+              </button>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
                   <button
