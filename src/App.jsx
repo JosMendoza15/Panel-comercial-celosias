@@ -1018,7 +1018,6 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
   };
 
   const esEdicion = !!initial;
-  const esTemprana = ETAPAS_TEMPRANAS.includes(form.etapa);
 
   // Al escribir un folio en "Nuevo pedido", si ya existe se reconoce automáticamente.
   const folioCoincidente = !esEdicion && form.numeroPedido.trim()
@@ -1031,13 +1030,13 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
   const anticipoNum = round2(Number(form.anticipoCapturado) || 0);
   const saldoNuevo = round2(subtotalNuevo - anticipoNum);
 
-  const canSaveNuevo = form.cliente.trim() && form.numeroPedido.trim() && form.fecha && (esTemprana || subtotalNuevo > 0);
+  const canSaveNuevo = form.cliente.trim() && form.numeroPedido.trim() && form.fecha;
   const canSaveEdicion = form.cliente.trim() && form.numeroPedido.trim() && form.fecha;
 
   const handleGuardarNuevo = () => {
     const cleanNum = (v) => (v === "" || v == null ? 0 : Number(v));
     const pagosIniciales = [];
-    if (!esTemprana && anticipoNum > 0 && form.fechaRealCobro) {
+    if (anticipoNum > 0 && form.fechaRealCobro) {
       pagosIniciales.push({
         id: uid(), fecha: form.fechaRealCobro, monto: anticipoNum,
         tipo: anticipoNum >= subtotalNuevo - 0.5 ? "Finiquito" : "Anticipo",
@@ -1048,7 +1047,7 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
       id: uid(),
       cantidadPiezas: cleanNum(form.cantidadPiezas),
       metrosCuadrados: cleanNum(form.metrosCuadrados),
-      subtotal: esTemprana ? "" : round2(subtotalNuevo),
+      subtotal: subtotalNuevo > 0 ? round2(subtotalNuevo) : "",
       conIVA: !!form.conIVA,
       anticipoPct: Number(form.anticipoPct) || 60,
       pagos: pagosIniciales,
@@ -1170,10 +1169,6 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
                 <div style={{ gridColumn: "span 2", display: "flex", flexDirection: "column", gap: 10 }}>
                   <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Cobro del pedido (folio bloqueado)</div>
                   <PagosHistorial venta={initial} onAddPago={(pago) => { onAddPago(initial.id, pago); onClose(); }} />
-                </div>
-              ) : esTemprana ? (
-                <div style={{ gridColumn: "span 2", fontSize: 12.5, color: MUTED, background: PAPER, borderRadius: 10, padding: "10px 14px" }}>
-                  Aún no hay monto capturado — normal en etapas tempranas. Agrégalo cuando envíes la cotización o se confirme el pedido.
                 </div>
               ) : (
                 <>
