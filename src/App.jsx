@@ -162,6 +162,41 @@ const getNextTier = (subtotal) => {
 
 const daysInMonth = (year, monthIdx) => new Date(year, monthIdx + 1, 0).getDate();
 
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Imprime con un título de documento limpio (sin nombres técnicos de la app).
+// El navegador puede agregar URL en encabezado/pie: recuerda a la persona
+// desactivar "Encabezados y pies de página" en el diálogo de impresión.
+const printClean = (title) => {
+  const prevTitle = document.title;
+  document.title = title || "Reporte";
+  window.print();
+  setTimeout(() => { document.title = prevTitle; }, 800);
+};
+
+const TIPOS_MOVIMIENTO = ["Anticipo", "Pago parcial", "Finiquito"];
+
+// Compatibilidad: pedidos capturados antes de este cambio no tienen "pagos",
+// así que se reconstruye un único movimiento a partir de los campos viejos.
+const getPagosPedido = (v) => {
+  if (Array.isArray(v.pagos) && v.pagos.length) return v.pagos;
+  if (v.etapa === "Cobrado" && Number(v.totalCobrado) > 0) {
+    const { subtotal } = calcSubtotalIVA(v.totalCobrado);
+    return [{ id: `legacy-${v.id}`, fecha: v.fechaRealCobro || v.fecha, monto: round2(subtotal), tipo: "Finiquito" }];
+  }
+  return [];
+};
+
+const getSubtotalPedido = (v) => {
+  if (v.subtotal !== undefined && v.subtotal !== null && v.subtotal !== "") return Number(v.subtotal) || 0;
+  if (Number(v.totalCobrado) > 0) return calcSubtotalIVA(v.totalCobrado).subtotal; // compatibilidad
+  return 0;
+};
+
+const getTotalPagado = (v) => getPagosPedido(v).reduce((s, p) => s + (Number(p.monto) || 0), 0);
+const getSaldoPendiente = (v) => round2(getSubtotalPedido(v) - getTotalPagado(v));
+const getLiquidado = (v) => getPagosPedido(v).length > 0 && getSaldoPendiente(v) <= 0.5;
+
 /* ============================== DATOS DE EJEMPLO ============================== */
 
 function seedData() {
@@ -368,6 +403,9 @@ function ventaToRow(v) {
     fecha_estimada_cobro: v.fechaEstimadaCobro || null, fecha_real_cobro: v.fechaRealCobro || null,
     observaciones: v.observaciones, etapa: v.etapa, proximo_seguimiento: v.proximoSeguimiento || null,
     nota_seguimiento: v.notaSeguimiento,
+    subtotal: v.subtotal === "" || v.subtotal === undefined ? null : v.subtotal,
+    con_iva: !!v.conIVA, anticipo_pct: v.anticipoPct === "" || v.anticipoPct === undefined ? null : v.anticipoPct,
+    pagos: JSON.stringify(Array.isArray(v.pagos) ? v.pagos : []),
   };
 }
 function rowToVenta(r) {
@@ -380,6 +418,8 @@ function rowToVenta(r) {
     fechaEstimadaCobro: r.fecha_estimada_cobro, fechaRealCobro: r.fecha_real_cobro,
     observaciones: r.observaciones, etapa: r.etapa, proximoSeguimiento: r.proximo_seguimiento,
     notaSeguimiento: r.nota_seguimiento,
+    subtotal: r.subtotal, conIVA: !!r.con_iva, anticipoPct: r.anticipo_pct,
+    pagos: typeof r.pagos === "string" ? (JSON.parse(r.pagos || "[]")) : (Array.isArray(r.pagos) ? r.pagos : []),
   };
 }
 
@@ -705,7 +745,7 @@ function CatalogSection({ title, icon: Icon, items, usageCount, onAdd, onRemove 
 }
 
 function KanbanCard({ v, onEdit, onDragStart }) {
-  const total = Number(v.totalCobrado) || 0;
+  const total = getSubtotalPedido(v);
   const vencido = v.proximoSeguimiento && v.proximoSeguimiento <= nowLocalISO();
   return (
     <div
@@ -855,19 +895,107 @@ const emptyForm = (cat) => ({
   ciudadDestino: "",
   tipoEnvio: "Local",
   fletera: cat.fleteras[0] || "",
-  totalCobrado: "",
+  conIVA: false,
+  subtotal: "",
+  totalConIVAInput: "",
+  anticipoPct: 60,
+  anticipoCapturado: "",
   formaPago: cat.formasPago[0] || "",
-  anticipo: "",
-  saldoPendiente: "",
-  fechaEstimadaCobro: "",
   fechaRealCobro: "",
+  pagos: [],
   observaciones: "",
   etapa: "Prospecto",
   proximoSeguimiento: "",
   notaSeguimiento: "",
 });
 
-function SaleModal({ initial, onClose, onSave, catalogos, clientesConocidos = [] }) {
+const getTotalConIVADisplay = (v) => {
+  if (Number(v.totalCobrado) > 0) return Number(v.totalCobrado);
+  return getSubtotalPedido(v) * 1.16;
+};
+
+// Resumen de folio + historial de pagos + mini-formulario para registrar un nuevo pago.
+// Se usa tanto cuando se reconoce un folio existente al capturar "Nuevo pedido"
+// como dentro de "Editar pedido".
+function PagosHistorial({ venta, onAddPago, locked }) {
+  const subtotal = getSubtotalPedido(venta);
+  const pagos = useMemo(() => [...getPagosPedido(venta)].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0)), [venta]);
+  const totalPagado = getTotalPagado(venta);
+  const saldo = getSaldoPendiente(venta);
+  const liquidado = getLiquidado(venta);
+
+  const [fecha, setFecha] = useState(todayISO());
+  const [monto, setMonto] = useState("");
+  const [tipo, setTipo] = useState("Pago parcial");
+
+  useEffect(() => {
+    const m = Number(monto) || 0;
+    if (m > 0 && m >= saldo - 0.5) setTipo("Finiquito");
+    else if (m > 0) setTipo((t) => (t === "Finiquito" ? "Pago parcial" : t));
+  }, [monto, saldo]);
+
+  const excede = (Number(monto) || 0) > saldo + 0.01;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SUBTOTAL (IMPORTE ORIGINAL)</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div></div>
+        {(venta.conIVA || Number(venta.totalCobrado) > 0) && (
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(getTotalConIVADisplay(venta))}</div></div>
+        )}
+        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL PAGADO</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado)}</div></div>
+        <div>
+          <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
+          {liquidado ? <Pill color={GOOD}>Liquidado</Pill> : <div style={{ fontWeight: 700, color: WARN }}>{fmtMoney(saldo)}</div>}
+        </div>
+      </div>
+
+      {pagos.length > 0 && (
+        <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ padding: "6px 12px", fontSize: 10.5, color: MUTED, fontWeight: 700, textTransform: "uppercase", background: PAPER }}>Historial de movimientos</div>
+          {pagos.map((p) => (
+            <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 12px", fontSize: 12.5, borderTop: `1px solid ${LINE}` }}>
+              <span style={{ color: MUTED }}>{fmtDate(p.fecha)}</span>
+              <Pill color={p.tipo === "Finiquito" ? GOOD : p.tipo === "Anticipo" ? ACCENT : WARN}>{p.tipo}</Pill>
+              <span style={{ fontWeight: 700 }}>{fmtMoney(p.monto)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!locked && !liquidado && (
+        <div style={{ border: `1px dashed ${LINE}`, borderRadius: 10, padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          <Field label="Fecha del pago"><TextInput type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
+          <Field label="Importe recibido"><TextInput type="number" min="0" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+          <Field label="Tipo de movimiento">
+            <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+              {TIPOS_MOVIMIENTO.map((t) => <option key={t}>{t}</option>)}
+            </Select>
+          </Field>
+          {excede && (
+            <div style={{ gridColumn: "span 3", fontSize: 12, color: BAD, background: `${BAD}12`, borderRadius: 8, padding: "6px 10px" }}>
+              ⚠ El importe ({fmtMoney(Number(monto) || 0)}) supera el saldo pendiente ({fmtMoney(saldo)}).
+            </div>
+          )}
+          <div style={{ gridColumn: "span 3" }}>
+            <Button
+              variant="primary" icon={Plus}
+              disabled={!(Number(monto) > 0 && fecha)}
+              onClick={() => {
+                if (excede && !window.confirm(`El pago de ${fmtMoney(Number(monto))} supera el saldo pendiente de ${fmtMoney(saldo)}. ¿Registrarlo de todas formas?`)) return;
+                onAddPago({ id: uid(), fecha, monto: round2(Number(monto)), tipo });
+              }}
+            >
+              Registrar pago
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesConocidos = [], ventasExistentes = [] }) {
   const [form, setForm] = useState(initial || emptyForm(catalogos));
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
@@ -888,11 +1016,55 @@ function SaleModal({ initial, onClose, onSave, catalogos, clientesConocidos = []
       return { ...f, cliente: val };
     });
   };
-  const total = Number(form.totalCobrado) || 0;
-  const { subtotal, iva } = calcSubtotalIVA(total);
+
+  const esEdicion = !!initial;
   const esTemprana = ETAPAS_TEMPRANAS.includes(form.etapa);
 
-  const canSave = form.cliente.trim() && form.numeroPedido.trim() && form.fecha && (esTemprana || total > 0);
+  // Al escribir un folio en "Nuevo pedido", si ya existe se reconoce automáticamente.
+  const folioCoincidente = !esEdicion && form.numeroPedido.trim()
+    ? ventasExistentes.find((v) => (v.numeroPedido || "").trim().toLowerCase() === form.numeroPedido.trim().toLowerCase())
+    : null;
+
+  const subtotalNuevo = form.conIVA ? (Number(form.totalConIVAInput) || 0) / 1.16 : (Number(form.subtotal) || 0);
+  const ivaNuevo = form.conIVA ? Math.max(0, (Number(form.totalConIVAInput) || 0) - subtotalNuevo) : 0;
+  const anticipoSugerido = round2(subtotalNuevo * ((Number(form.anticipoPct) || 0) / 100));
+  const anticipoNum = round2(Number(form.anticipoCapturado) || 0);
+  const saldoNuevo = round2(subtotalNuevo - anticipoNum);
+
+  const canSaveNuevo = form.cliente.trim() && form.numeroPedido.trim() && form.fecha && (esTemprana || subtotalNuevo > 0);
+  const canSaveEdicion = form.cliente.trim() && form.numeroPedido.trim() && form.fecha;
+
+  const handleGuardarNuevo = () => {
+    const cleanNum = (v) => (v === "" || v == null ? 0 : Number(v));
+    const pagosIniciales = [];
+    if (!esTemprana && anticipoNum > 0 && form.fechaRealCobro) {
+      pagosIniciales.push({
+        id: uid(), fecha: form.fechaRealCobro, monto: anticipoNum,
+        tipo: anticipoNum >= subtotalNuevo - 0.5 ? "Finiquito" : "Anticipo",
+      });
+    }
+    onSave({
+      ...form,
+      id: uid(),
+      cantidadPiezas: cleanNum(form.cantidadPiezas),
+      metrosCuadrados: cleanNum(form.metrosCuadrados),
+      subtotal: esTemprana ? "" : round2(subtotalNuevo),
+      conIVA: !!form.conIVA,
+      anticipoPct: Number(form.anticipoPct) || 60,
+      pagos: pagosIniciales,
+      etapa: pagosIniciales.length && anticipoNum >= subtotalNuevo - 0.5 ? "Cobrado" : form.etapa,
+    });
+  };
+
+  const handleGuardarEdicion = () => {
+    const cleanNum = (v) => (v === "" || v == null ? 0 : Number(v));
+    onSave({
+      ...form,
+      id: initial.id,
+      cantidadPiezas: cleanNum(form.cantidadPiezas),
+      metrosCuadrados: cleanNum(form.metrosCuadrados),
+    });
+  };
 
   return (
     <div style={{
@@ -902,133 +1074,167 @@ function SaleModal({ initial, onClose, onSave, catalogos, clientesConocidos = []
       <Card style={{ width: "100%", maxWidth: 780, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
           <div style={{ fontWeight: 700, fontSize: 15.5, color: INK }}>
-            {initial ? "Editar pedido" : "Nuevo pedido"}
+            {esEdicion ? "Editar pedido" : folioCoincidente ? "Folio existente" : "Nuevo pedido"}
           </div>
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}>
             <X size={20} />
           </button>
         </div>
 
-        <div style={{ padding: 20, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, maxHeight: "65vh", overflowY: "auto" }}>
-          <Field label="Fecha"><TextInput type="date" value={form.fecha} onChange={set("fecha")} /></Field>
-          <Field label="Número de pedido"><TextInput placeholder="PED-1001" value={form.numeroPedido} onChange={set("numeroPedido")} /></Field>
-
-          <Field label="Cliente">
-            <TextInput list="clientes-datalist" placeholder="Escribe o elige un cliente existente" value={form.cliente} onChange={setCliente} />
-            <datalist id="clientes-datalist">
-              {clientesConocidos.map((c) => <option key={c.cliente} value={c.cliente} />)}
-            </datalist>
-          </Field>
-          <Field label="Empresa"><TextInput placeholder="Razón social" value={form.empresa} onChange={set("empresa")} /></Field>
-
-          <Field label="Teléfono"><TextInput placeholder="999 000 0000" value={form.telefono} onChange={set("telefono")} /></Field>
-          <Field label="Correo"><TextInput type="email" placeholder="cliente@correo.com" value={form.correo} onChange={set("correo")} /></Field>
-
-          <Field label="Modelo">
-            <Select value={form.modelo} onChange={set("modelo")}>
-              {catalogos.modelos.map((m) => <option key={m}>{m}</option>)}
-            </Select>
-          </Field>
-          <Field label="Etapa">
-            <Select value={form.etapa} onChange={set("etapa")}>
-              {ETAPAS.map((e) => <option key={e}>{e}</option>)}
-            </Select>
-          </Field>
-
-          <Field label="Cantidad de piezas"><TextInput type="number" min="0" value={form.cantidadPiezas} onChange={set("cantidadPiezas")} /></Field>
-          <Field label="Metros cuadrados (m²)"><TextInput type="number" min="0" value={form.metrosCuadrados} onChange={set("metrosCuadrados")} /></Field>
-
-          <Field label="Color / Paleta">
-            <Select value={form.color} onChange={set("color")}>{catalogos.colores.map((c) => <option key={c}>{c}</option>)}</Select>
-          </Field>
-          <Field label="Acabado">
-            <Select value={form.acabado} onChange={set("acabado")}>{catalogos.acabados.map((a) => <option key={a}>{a}</option>)}</Select>
-          </Field>
-
-          <Field label="Estado destino">
-            <Select value={form.estadoDestino} onChange={set("estadoDestino")}>
-              {ESTADOS_MX.map((e) => <option key={e}>{e}</option>)}
-            </Select>
-          </Field>
-          <Field label="Ciudad destino"><TextInput placeholder="Ciudad" value={form.ciudadDestino} onChange={set("ciudadDestino")} /></Field>
-
-          <Field label="Tipo de envío">
-            <Select value={form.tipoEnvio} onChange={set("tipoEnvio")}>
-              <option>Local</option><option>Nacional</option>
-            </Select>
-          </Field>
-          <Field label="Fletera">
-            <Select value={form.fletera} onChange={set("fletera")}>{catalogos.fleteras.map((f) => <option key={f}>{f}</option>)}</Select>
-          </Field>
-
-          <Field label={esTemprana ? "Total cobrado (opcional en esta etapa)" : "Total cobrado (con IVA)"}>
-            <TextInput type="number" min="0" placeholder={esTemprana ? "Aún sin cotizar" : "0.00"} value={form.totalCobrado} onChange={set("totalCobrado")} />
-          </Field>
-          <Field label="Forma de pago">
-            <Select value={form.formaPago} onChange={set("formaPago")}>{catalogos.formasPago.map((f) => <option key={f}>{f}</option>)}</Select>
-          </Field>
-
-          <Field label={esTemprana ? "Anticipo (opcional)" : "Anticipo"}><TextInput type="number" min="0" value={form.anticipo} onChange={set("anticipo")} /></Field>
-          <Field label={esTemprana ? "Saldo pendiente (opcional)" : "Saldo pendiente"}><TextInput type="number" min="0" value={form.saldoPendiente} onChange={set("saldoPendiente")} /></Field>
-
-          <Field label={esTemprana ? "Fecha estimada de cobro (opcional)" : "Fecha estimada de cobro"}><TextInput type="date" value={form.fechaEstimadaCobro} onChange={set("fechaEstimadaCobro")} /></Field>
-          <Field label="Fecha real de cobro"><TextInput type="date" value={form.fechaRealCobro} onChange={set("fechaRealCobro")} /></Field>
-
-          <Field label="Próximo seguimiento (recordatorio)"><TextInput type="datetime-local" value={form.proximoSeguimiento} onChange={set("proximoSeguimiento")} /></Field>
-          <Field label="¿Qué hay que hacer?"><TextInput placeholder="Ej. Llamarle para confirmar precio" value={form.notaSeguimiento} onChange={set("notaSeguimiento")} /></Field>
-
-          <Field label="Observaciones" span={2}>
-            <TextArea placeholder="Notas del pedido…" value={form.observaciones} onChange={set("observaciones")} />
-          </Field>
-
-          <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-            {total > 0 ? (
-              <>
-                <div>
-                  <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SUBTOTAL SIN IVA</div>
-                  <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>IVA (16%)</div>
-                  <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(iva)}</div>
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: 12.5, color: MUTED }}>
-                Aún no hay monto capturado — normal en etapas tempranas. Agrégalo cuando envíes la cotización o se confirme el pedido.
-              </div>
-            )}
-            <div>
-              <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SOLO CUENTA PARA COMISIÓN SI ESTÁ "COBRADO"</div>
-              <div style={{ fontWeight: 700, color: form.etapa === "Cobrado" ? GOOD : MUTED }}>
-                {form.etapa === "Cobrado" ? "Sí, suma a la meta" : "Aún no suma"}
-              </div>
+        {folioCoincidente ? (
+          /* ---------- Folio ya existente: datos bloqueados + solo captura de pago ---------- */
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14, maxHeight: "70vh", overflowY: "auto" }}>
+            <div style={{ fontSize: 12.5, color: ACCENT, background: `${ACCENT}12`, borderRadius: 8, padding: "9px 12px" }}>
+              El pedido <b>{folioCoincidente.numeroPedido}</b> ya existe. No se crea un pedido nuevo — solo registra el pago.
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, fontSize: 13 }}>
+              <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Cliente</div><div style={{ fontWeight: 600 }}>{folioCoincidente.cliente}</div></div>
+              <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Empresa</div><div>{folioCoincidente.empresa || "—"}</div></div>
+              <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Modelo / cantidades</div><div>{folioCoincidente.modelo} · {fmtNum(folioCoincidente.cantidadPiezas)} pzas · {fmtNum(folioCoincidente.metrosCuadrados)} m²</div></div>
+              <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Destino</div><div>{folioCoincidente.ciudadDestino}, {folioCoincidente.estadoDestino}</div></div>
+            </div>
+            <PagosHistorial
+              venta={folioCoincidente}
+              onAddPago={(pago) => { onAddPago(folioCoincidente.id, pago); onClose(); }}
+            />
           </div>
-        </div>
+        ) : (
+          <>
+            <div style={{ padding: 20, display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12, maxHeight: "65vh", overflowY: "auto" }}>
+              <Field label="Fecha"><TextInput type="date" value={form.fecha} onChange={set("fecha")} /></Field>
+              <Field label="Número de pedido (folio)">
+                <TextInput placeholder="PED-1001" value={form.numeroPedido} onChange={set("numeroPedido")} disabled={esEdicion} />
+              </Field>
 
-        <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-          <Button
-            variant="primary"
-            icon={CheckCircle2}
-            disabled={!canSave}
-            onClick={() => {
-              const cleanNum = (v) => (v === "" || v == null ? 0 : Number(v));
-              onSave({
-                ...form,
-                id: form.id || uid(),
-                cantidadPiezas: cleanNum(form.cantidadPiezas),
-                metrosCuadrados: cleanNum(form.metrosCuadrados),
-                totalCobrado: cleanNum(form.totalCobrado),
-                anticipo: cleanNum(form.anticipo),
-                saldoPendiente: cleanNum(form.saldoPendiente),
-              });
-            }}
-          >
-            Guardar pedido
-          </Button>
-        </div>
+              <Field label="Cliente">
+                <TextInput list="clientes-datalist" placeholder="Escribe o elige un cliente existente" value={form.cliente} onChange={setCliente} />
+                <datalist id="clientes-datalist">
+                  {clientesConocidos.map((c) => <option key={c.cliente} value={c.cliente} />)}
+                </datalist>
+              </Field>
+              <Field label="Empresa"><TextInput placeholder="Razón social" value={form.empresa} onChange={set("empresa")} /></Field>
+
+              <Field label="Teléfono"><TextInput placeholder="999 000 0000" value={form.telefono} onChange={set("telefono")} /></Field>
+              <Field label="Correo"><TextInput type="email" placeholder="cliente@correo.com" value={form.correo} onChange={set("correo")} /></Field>
+
+              <Field label="Modelo">
+                <Select value={form.modelo} onChange={set("modelo")}>
+                  {catalogos.modelos.map((m) => <option key={m}>{m}</option>)}
+                </Select>
+              </Field>
+              <Field label="Etapa">
+                <Select value={form.etapa} onChange={set("etapa")}>
+                  {ETAPAS.map((e) => <option key={e}>{e}</option>)}
+                </Select>
+              </Field>
+
+              <Field label="Cantidad de piezas"><TextInput type="number" min="0" value={form.cantidadPiezas} onChange={set("cantidadPiezas")} /></Field>
+              <Field label="Metros cuadrados (m²)"><TextInput type="number" min="0" value={form.metrosCuadrados} onChange={set("metrosCuadrados")} /></Field>
+
+              <Field label="Color / Paleta">
+                <Select value={form.color} onChange={set("color")}>{catalogos.colores.map((c) => <option key={c}>{c}</option>)}</Select>
+              </Field>
+              <Field label="Acabado">
+                <Select value={form.acabado} onChange={set("acabado")}>{catalogos.acabados.map((a) => <option key={a}>{a}</option>)}</Select>
+              </Field>
+
+              <Field label="Estado destino">
+                <Select value={form.estadoDestino} onChange={set("estadoDestino")}>
+                  {ESTADOS_MX.map((e) => <option key={e}>{e}</option>)}
+                </Select>
+              </Field>
+              <Field label="Ciudad destino"><TextInput placeholder="Ciudad" value={form.ciudadDestino} onChange={set("ciudadDestino")} /></Field>
+
+              <Field label="Tipo de envío">
+                <Select value={form.tipoEnvio} onChange={set("tipoEnvio")}>
+                  <option>Local</option><option>Nacional</option>
+                </Select>
+              </Field>
+              <Field label="Fletera">
+                <Select value={form.fletera} onChange={set("fletera")}>{catalogos.fleteras.map((f) => <option key={f}>{f}</option>)}</Select>
+              </Field>
+
+              <Field label="Forma de pago">
+                <Select value={form.formaPago} onChange={set("formaPago")}>{catalogos.formasPago.map((f) => <option key={f}>{f}</option>)}</Select>
+              </Field>
+              <Field label="Próximo seguimiento (recordatorio)"><TextInput type="datetime-local" value={form.proximoSeguimiento} onChange={set("proximoSeguimiento")} /></Field>
+
+              <Field label="¿Qué hay que hacer?" span={2}><TextInput placeholder="Ej. Llamarle para confirmar precio" value={form.notaSeguimiento} onChange={set("notaSeguimiento")} /></Field>
+
+              <Field label="Observaciones" span={2}>
+                <TextArea placeholder="Notas del pedido…" value={form.observaciones} onChange={set("observaciones")} />
+              </Field>
+
+              {/* ---------- Bloque de dinero ---------- */}
+              {esEdicion ? (
+                <div style={{ gridColumn: "span 2", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase" }}>Cobro del pedido (folio bloqueado)</div>
+                  <PagosHistorial venta={initial} onAddPago={(pago) => { onAddPago(initial.id, pago); onClose(); }} />
+                </div>
+              ) : esTemprana ? (
+                <div style={{ gridColumn: "span 2", fontSize: 12.5, color: MUTED, background: PAPER, borderRadius: 10, padding: "10px 14px" }}>
+                  Aún no hay monto capturado — normal en etapas tempranas. Agrégalo cuando envíes la cotización o se confirme el pedido.
+                </div>
+              ) : (
+                <>
+                  <Field label="¿El monto que capturas incluye IVA?">
+                    <Select value={form.conIVA ? "si" : "no"} onChange={(e) => set("conIVA")(e.target.value === "si")}>
+                      <option value="no">Sin IVA (yo capturo el subtotal)</option>
+                      <option value="si">Con IVA (yo capturo el total)</option>
+                    </Select>
+                  </Field>
+                  {form.conIVA ? (
+                    <Field label="Total con IVA"><TextInput type="number" min="0" placeholder="0.00" value={form.totalConIVAInput} onChange={set("totalConIVAInput")} /></Field>
+                  ) : (
+                    <Field label="Subtotal (sin IVA)"><TextInput type="number" min="0" placeholder="0.00" value={form.subtotal} onChange={set("subtotal")} /></Field>
+                  )}
+
+                  <Field label="% anticipo sugerido (editable)"><TextInput type="number" min="0" max="100" value={form.anticipoPct} onChange={set("anticipoPct")} /></Field>
+                  <Field label="Fecha real de cobro (del anticipo)"><TextInput type="date" value={form.fechaRealCobro} onChange={set("fechaRealCobro")} /></Field>
+
+                  <Field label="Anticipo capturado">
+                    <TextInput type="number" min="0" placeholder={anticipoSugerido ? String(round2(anticipoSugerido)) : "0.00"} value={form.anticipoCapturado} onChange={set("anticipoCapturado")} />
+                  </Field>
+                  <div style={{ alignSelf: "end", fontSize: 12, color: MUTED, paddingBottom: 8 }}>
+                    Sugerido ({form.anticipoPct || 0}%): <b style={{ color: INK }}>{fmtMoney(anticipoSugerido)}</b>
+                  </div>
+
+                  <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SUBTOTAL SIN IVA</div>
+                      <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo)}</div>
+                    </div>
+                    {form.conIVA && (
+                      <div>
+                        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>IVA (16%)</div>
+                        <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(ivaNuevo)}</div>
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
+                      <div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo))}</div>
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: "span 2", fontSize: 11.5, color: MUTED }}>
+                    La comisión siempre se calcula sobre el subtotal sin IVA, nunca sobre el total con IVA.
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <Button variant="secondary" onClick={onClose}>Cancelar</Button>
+              <Button
+                variant="primary"
+                icon={CheckCircle2}
+                disabled={esEdicion ? !canSaveEdicion : !canSaveNuevo}
+                onClick={esEdicion ? handleGuardarEdicion : handleGuardarNuevo}
+              >
+                {esEdicion ? "Guardar cambios" : "Guardar pedido"}
+              </Button>
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );
@@ -1037,8 +1243,9 @@ function SaleModal({ initial, onClose, onSave, catalogos, clientesConocidos = []
 /* ============================== COTIZACIÓN IMPRIMIBLE ============================== */
 
 function QuoteModal({ venta, empresaInfo, onClose }) {
-  const total = Number(venta.totalCobrado) || 0;
-  const { subtotal, iva } = calcSubtotalIVA(total);
+  const subtotal = getSubtotalPedido(venta);
+  const iva = venta.conIVA ? subtotal * 0.16 : 0;
+  const total = venta.conIVA ? subtotal + iva : subtotal;
   const nombreEmpresa = (empresaInfo && empresaInfo.nombre) || "Tu empresa";
 
   return (
@@ -1117,7 +1324,7 @@ function QuoteModal({ venta, empresaInfo, onClose }) {
 
         <div className="no-print" style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="secondary" onClick={onClose}>Cerrar</Button>
-          <Button icon={Printer} onClick={() => window.print()}>Imprimir / Guardar PDF</Button>
+          <Button icon={Printer} onClick={() => printClean(`Cotización ${venta.numeroPedido || ""}`)}>Imprimir / Guardar PDF</Button>
         </div>
       </Card>
     </div>
@@ -1922,7 +2129,27 @@ export default function App() {
 
   const handleStageChange = (id, etapa) => {
     setVentas((prev) => {
-      const next = prev.map((v) => (v.id === id ? { ...v, etapa, fechaRealCobro: etapa === "Cobrado" && !v.fechaRealCobro ? todayISO() : v.fechaRealCobro, saldoPendiente: etapa === "Cobrado" ? 0 : v.saldoPendiente } : v));
+      const next = prev.map((v) => (v.id === id ? { ...v, etapa } : v));
+      saveToStorage(next);
+      return next;
+    });
+  };
+
+  // Registra un pago (anticipo, pago parcial o finiquito) sobre un folio ya existente.
+  const handleAddPago = (ventaId, pago) => {
+    setVentas((prev) => {
+      const next = prev.map((v) => {
+        if (v.id !== ventaId) return v;
+        const pagosActuales = getPagosPedido(v).filter((p) => !String(p.id).startsWith("legacy-"));
+        const pagosNuevos = [...pagosActuales, pago];
+        const saldoNuevo = round2(getSubtotalPedido(v) - pagosNuevos.reduce((s, p) => s + (Number(p.monto) || 0), 0));
+        return {
+          ...v,
+          pagos: pagosNuevos,
+          fechaRealCobro: pago.fecha || v.fechaRealCobro,
+          etapa: saldoNuevo <= 0.5 ? "Cobrado" : v.etapa,
+        };
+      });
       saveToStorage(next);
       return next;
     });
@@ -1930,21 +2157,38 @@ export default function App() {
 
   /* ---------- Derivados generales ---------- */
 
-  const cobradas = useMemo(() => ventas.filter((v) => v.etapa === "Cobrado"), [ventas]);
+  // Cada pago (anticipo/parcial/finiquito) de cada folio es un "movimiento de cobro"
+  // independiente: cuenta para la comisión del mes de SU PROPIA fecha, sin duplicar el pedido.
+  const movimientosCobro = useMemo(() => {
+    const list = [];
+    ventas.forEach((v) => {
+      getPagosPedido(v).forEach((p) => {
+        list.push({ ...p, ventaId: v.id, cliente: v.cliente, modelo: v.modelo, estadoDestino: v.estadoDestino, conIVA: v.conIVA });
+      });
+    });
+    return list;
+  }, [ventas]);
 
   const [y, mIdx] = monthFilter.split("-").map((x, i) => (i === 1 ? Number(x) - 1 : Number(x)));
 
-  const cobradasMes = useMemo(
-    () => cobradas.filter((v) => monthKeyOf(v.fecha) === monthFilter),
-    [cobradas, monthFilter]
+  const movimientosMes = useMemo(
+    () => movimientosCobro.filter((p) => monthKeyOf(p.fecha) === monthFilter),
+    [movimientosCobro, monthFilter]
   );
   const pedidosMes = useMemo(
     () => ventas.filter((v) => monthKeyOf(v.fecha) === monthFilter),
     [ventas, monthFilter]
   );
+  const pedidosConMovimientoMes = useMemo(() => {
+    const ids = new Set(movimientosMes.map((p) => p.ventaId));
+    return ventas.filter((v) => ids.has(v.id));
+  }, [ventas, movimientosMes]);
 
-  const subtotalMes = useMemo(() => cobradasMes.reduce((s, v) => s + calcSubtotalIVA(v.totalCobrado).subtotal, 0), [cobradasMes]);
-  const totalConIVAMes = useMemo(() => cobradasMes.reduce((s, v) => s + Number(v.totalCobrado || 0), 0), [cobradasMes]);
+  const subtotalMes = useMemo(() => movimientosMes.reduce((s, p) => s + (Number(p.monto) || 0), 0), [movimientosMes]);
+  const totalConIVAMes = useMemo(
+    () => movimientosMes.reduce((s, p) => s + (Number(p.monto) || 0) * (p.conIVA ? 1.16 : 1), 0),
+    [movimientosMes]
+  );
   const ivaMes = totalConIVAMes - subtotalMes;
 
   const tierActual = getTier(subtotalMes);
@@ -1961,10 +2205,10 @@ export default function App() {
   const tierPronostico = getTier(pronostico);
   const comisionEstimada = pronostico * (tierPronostico.pct / 100);
 
-  const ticketPromedio = cobradasMes.length ? subtotalMes / cobradasMes.length : 0;
-  const totalClientesMes = new Set(pedidosMes.map((v) => v.cliente)).size;
-  const totalM2Mes = cobradasMes.reduce((s, v) => s + Number(v.metrosCuadrados || 0), 0);
-  const totalPiezasMes = cobradasMes.reduce((s, v) => s + Number(v.cantidadPiezas || 0), 0);
+  const ticketPromedio = pedidosConMovimientoMes.length ? subtotalMes / pedidosConMovimientoMes.length : 0;
+  const totalClientesMes = new Set(pedidosConMovimientoMes.map((v) => v.cliente)).size;
+  const totalM2Mes = pedidosConMovimientoMes.reduce((s, v) => s + Number(v.metrosCuadrados || 0), 0);
+  const totalPiezasMes = pedidosConMovimientoMes.reduce((s, v) => s + Number(v.cantidadPiezas || 0), 0);
 
   const mensajeNivel = subtotalMes < 250000
     ? `Te faltan ${fmtMoney(250000 - subtotalMes)} para comenzar a comisionar.`
@@ -1975,40 +2219,43 @@ export default function App() {
   const porDia = useMemo(() => {
     const map = {};
     for (let d = 1; d <= totalDiasMes; d++) map[d] = 0;
-    cobradasMes.forEach((v) => {
-      const d = Number(v.fecha.slice(8, 10));
-      map[d] = (map[d] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+    movimientosMes.forEach((p) => {
+      const d = Number((p.fecha || "").slice(8, 10));
+      if (d) map[d] = (map[d] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).map((d) => ({ dia: d, ventas: Math.round(map[d]) }));
-  }, [cobradasMes, totalDiasMes]);
+  }, [movimientosMes, totalDiasMes]);
 
   const porSemana = useMemo(() => {
     const map = {};
-    cobradasMes.forEach((v) => {
-      const d = Number(v.fecha.slice(8, 10));
+    movimientosMes.forEach((p) => {
+      const d = Number((p.fecha || "").slice(8, 10));
+      if (!d) return;
       const semana = `Sem ${Math.ceil(d / 7)}`;
-      map[semana] = (map[semana] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+      map[semana] = (map[semana] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).sort().map((k) => ({ semana: k, ventas: Math.round(map[k]) }));
-  }, [cobradasMes]);
+  }, [movimientosMes]);
 
   const porMes = useMemo(() => {
     const map = {};
-    cobradas.forEach((v) => {
-      const k = monthKeyOf(v.fecha);
-      map[k] = (map[k] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+    movimientosCobro.forEach((p) => {
+      const k = monthKeyOf(p.fecha);
+      if (!k) return;
+      map[k] = (map[k] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).sort().slice(-6).map((k) => {
       const [yy, mm] = k.split("-");
       return { mes: `${MESES[Number(mm) - 1]} ${yy.slice(2)}`, ventas: Math.round(map[k]) };
     });
-  }, [cobradas]);
+  }, [movimientosCobro]);
 
   const historialComisiones = useMemo(() => {
     const map = {};
-    cobradas.forEach((v) => {
-      const k = monthKeyOf(v.fecha);
-      map[k] = (map[k] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+    movimientosCobro.forEach((p) => {
+      const k = monthKeyOf(p.fecha);
+      if (!k) return;
+      map[k] = (map[k] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).sort().reverse().slice(0, 12).map((k) => {
       const [yy, mm] = k.split("-");
@@ -2022,23 +2269,23 @@ export default function App() {
         comision: subtotalMesH * (tierH.pct / 100),
       };
     });
-  }, [cobradas]);
+  }, [movimientosCobro]);
 
   const porEstado = useMemo(() => {
     const map = {};
-    cobradasMes.forEach((v) => {
-      map[v.estadoDestino] = (map[v.estadoDestino] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+    movimientosMes.forEach((p) => {
+      map[p.estadoDestino] = (map[p.estadoDestino] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).map((k) => ({ name: k, value: Math.round(map[k]) })).sort((a, b) => b.value - a.value);
-  }, [cobradasMes]);
+  }, [movimientosMes]);
 
   const porModelo = useMemo(() => {
     const map = {};
-    cobradasMes.forEach((v) => {
-      map[v.modelo] = (map[v.modelo] || 0) + calcSubtotalIVA(v.totalCobrado).subtotal;
+    movimientosMes.forEach((p) => {
+      map[p.modelo] = (map[p.modelo] || 0) + (Number(p.monto) || 0);
     });
     return Object.keys(map).map((k) => ({ name: k, value: Math.round(map[k]) })).sort((a, b) => b.value - a.value);
-  }, [cobradasMes]);
+  }, [movimientosMes]);
 
   const PIE_COLORS = [NAVY, ACCENT, "#7A4FC2", GOOD, WARN, "#2C8FAE", BAD, "#8C99AB"];
 
@@ -2050,11 +2297,14 @@ export default function App() {
       const key = v.cliente || "—";
       if (!map[key]) map[key] = { cliente: key, empresa: v.empresa, pedidos: 0, totalCobrado: 0, ultima: v.fecha, telefono: v.telefono, correo: v.correo };
       map[key].pedidos += 1;
-      if (v.etapa === "Cobrado") map[key].totalCobrado += calcSubtotalIVA(v.totalCobrado).subtotal;
       if (v.fecha > map[key].ultima) map[key].ultima = v.fecha;
     });
+    movimientosCobro.forEach((p) => {
+      const key = p.cliente || "—";
+      if (map[key]) map[key].totalCobrado += Number(p.monto) || 0;
+    });
     return Object.values(map).sort((a, b) => b.totalCobrado - a.totalCobrado);
-  }, [ventas]);
+  }, [ventas, movimientosCobro]);
 
   /* ---------- Modelos ---------- */
 
@@ -2065,11 +2315,14 @@ export default function App() {
       if (!map[key]) map[key] = { modelo: key, piezas: 0, m2: 0, ventas: 0, clientes: new Set() };
       map[key].piezas += Number(v.cantidadPiezas || 0);
       map[key].m2 += Number(v.metrosCuadrados || 0);
-      if (v.etapa === "Cobrado") map[key].ventas += calcSubtotalIVA(v.totalCobrado).subtotal;
       map[key].clientes.add(v.cliente);
     });
+    movimientosCobro.forEach((p) => {
+      const key = p.modelo || "—";
+      if (map[key]) map[key].ventas += Number(p.monto) || 0;
+    });
     return Object.values(map).map((m) => ({ ...m, clientes: m.clientes.size })).sort((a, b) => b.ventas - a.ventas);
-  }, [ventas]);
+  }, [ventas, movimientosCobro]);
 
   /* ---------- Alertas ---------- */
 
@@ -2090,9 +2343,9 @@ export default function App() {
         list.push({ tipo: "recordatorio", icon: CalendarClock, color: ACCENT, texto: `+${recordatoriosHoy.length - 5} recordatorio(s) más pendientes.` });
       }
     }
-    const pendientesCobro = ventas.filter((v) => v.etapa !== "Cobrado" && v.fechaEstimadaCobro && v.fechaEstimadaCobro <= todayISO());
+    const pendientesCobro = ventas.filter((v) => getSubtotalPedido(v) > 0 && getSaldoPendiente(v) > 0.5);
     if (pendientesCobro.length) {
-      list.push({ tipo: "cobro", icon: Wallet, color: WARN, texto: `${pendientesCobro.length} pedido(s) con fecha estimada de cobro vencida o vigente sin marcar como cobrados.` });
+      list.push({ tipo: "cobro", icon: Wallet, color: WARN, texto: `${pendientesCobro.length} pedido(s) con saldo pendiente por cobrar.` });
     }
     const sinSeguimiento = ventas.filter((v) => {
       if (["Cobrado", "Entregado"].includes(v.etapa)) return false;
@@ -2107,11 +2360,11 @@ export default function App() {
       const dias = Math.floor((new Date() - new Date(ultimaVenta)) / 86400000);
       if (dias >= 4) list.push({ tipo: "inactividad", icon: AlertTriangle, color: BAD, texto: `Llevas ${dias} días sin registrar una nueva venta.` });
     }
-    if (subtotalMes >= META_MENSUAL && cobradasMes.length) {
+    if (subtotalMes >= META_MENSUAL && movimientosMes.length) {
       list.push({ tipo: "meta", icon: Sparkles, color: GOOD, texto: `¡Meta mensual alcanzada! Ya vas en ${tierActual.pct.toFixed(2)}% de comisión este mes.` });
     }
     return list;
-  }, [ventas, tierSiguiente, faltanteSiguiente, subtotalMes, cobradasMes, tierActual]);
+  }, [ventas, tierSiguiente, faltanteSiguiente, subtotalMes, movimientosMes, tierActual]);
 
   /* ---------- Exportaciones ---------- */
 
@@ -2133,16 +2386,19 @@ export default function App() {
   const reportRows = useMemo(buildReportRows, [ventas, reportFilters]);
 
   const toExportArray = (rows) => rows.map((v) => {
-    const { subtotal, iva } = calcSubtotalIVA(v.totalCobrado);
+    const subtotal = getSubtotalPedido(v);
+    const totalPagado = getTotalPagado(v);
+    const saldo = getSaldoPendiente(v);
     return {
       Fecha: v.fecha, Pedido: v.numeroPedido, Cliente: v.cliente, Empresa: v.empresa,
       Teléfono: v.telefono, Correo: v.correo, Modelo: v.modelo, Piezas: v.cantidadPiezas,
       "M2": v.metrosCuadrados, Color: v.color,
       Acabado: v.acabado, "Estado destino": v.estadoDestino, "Ciudad destino": v.ciudadDestino,
-      "Tipo envío": v.tipoEnvio, Fletera: v.fletera, "Total con IVA": v.totalCobrado,
-      "Subtotal sin IVA": Math.round(subtotal * 100) / 100, IVA: Math.round(iva * 100) / 100, "Forma de pago": v.formaPago,
-      Anticipo: v.anticipo, "Saldo pendiente": v.saldoPendiente, "Fecha est. cobro": v.fechaEstimadaCobro,
-      "Fecha real cobro": v.fechaRealCobro, Etapa: v.etapa, Observaciones: v.observaciones,
+      "Tipo envío": v.tipoEnvio, Fletera: v.fletera, "Con IVA": v.conIVA ? "Sí" : "No",
+      "Subtotal sin IVA": round2(subtotal), "Total con IVA": v.conIVA ? round2(subtotal * 1.16) : "",
+      "Forma de pago": v.formaPago, "% Anticipo sugerido": v.anticipoPct || "",
+      "Total pagado": round2(totalPagado), "Saldo pendiente": round2(saldo),
+      Etapa: getLiquidado(v) ? "Liquidado" : v.etapa, Observaciones: v.observaciones,
     };
   });
 
@@ -2168,7 +2424,7 @@ export default function App() {
   };
 
   const exportPDF = () => {
-    window.print();
+    printClean("Reporte de ventas");
   };
 
   /* ---------- Búsqueda tabla ventas ---------- */
@@ -2360,7 +2616,7 @@ export default function App() {
               <StatCard icon={Wallet} label="Venta acum. sin IVA" value={fmtMoney(subtotalMes)} accent={NAVY} />
               <StatCard icon={Receipt} label="Venta acum. con IVA" value={fmtMoney(totalConIVAMes)} accent={ACCENT} />
               <StatCard icon={Receipt} label="IVA acumulado" value={fmtMoney(ivaMes)} accent={WARN} />
-              <StatCard icon={ShoppingCart} label="Total de pedidos" value={fmtNum(pedidosMes.length)} sub={`${cobradasMes.length} cobrados`} accent={NAVY_SOFT} />
+              <StatCard icon={ShoppingCart} label="Total de pedidos" value={fmtNum(pedidosMes.length)} sub={`${pedidosConMovimientoMes.length} con cobro`} accent={NAVY_SOFT} />
               <StatCard icon={Users2} label="Total de clientes" value={fmtNum(totalClientesMes)} accent={"#7A4FC2"} />
               <StatCard icon={Ruler} label="m² vendidos" value={fmtNum(totalM2Mes)} accent={"#2C8FAE"} />
               <StatCard icon={Package} label="Piezas vendidas" value={fmtNum(totalPiezasMes)} accent={"#2C8F5B"} />
@@ -2817,14 +3073,16 @@ export default function App() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: PAPER, textAlign: "left" }}>
-                      {["Fecha", "Pedido", "Cliente", "Modelo", "Total", "Subtotal", "Destino", "Etapa", ""].map((h) => (
+                      {["Fecha", "Pedido", "Cliente", "Modelo", "Subtotal", "Saldo", "Destino", "Etapa", ""].map((h) => (
                         <th key={h} style={{ padding: "10px 12px", fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {ventasOrdenadas.map((v) => {
-                      const { subtotal } = calcSubtotalIVA(v.totalCobrado);
+                      const subtotal = getSubtotalPedido(v);
+                      const saldo = getSaldoPendiente(v);
+                      const liquidado = getLiquidado(v);
                       return (
                         <tr key={v.id} style={{ borderTop: `1px solid ${LINE}` }}>
                           <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: MUTED }}>{fmtDate(v.fecha)}</td>
@@ -2834,8 +3092,12 @@ export default function App() {
                             <div style={{ fontSize: 11.5, color: MUTED }}>{v.empresa}</div>
                           </td>
                           <td style={{ padding: "10px 12px" }}>{v.modelo}</td>
-                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{fmtMoney(v.totalCobrado)}</td>
-                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: MUTED }}>{fmtMoney(subtotal)}</td>
+                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{fmtMoney(subtotal)}</td>
+                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                            {liquidado
+                              ? <Pill color={GOOD}>Liquidado</Pill>
+                              : <span style={{ color: saldo > 0 ? WARN : MUTED, fontWeight: 600 }}>{fmtMoney(saldo)}</span>}
+                          </td>
                           <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} color={MUTED} />{v.ciudadDestino}, {v.estadoDestino}</div>
                           </td>
@@ -3010,7 +3272,7 @@ export default function App() {
                         <td style={{ padding: "8px 10px" }}>{v.ciudadDestino}</td>
                         <td style={{ padding: "8px 10px" }}>{v.tipoEnvio}</td>
                         <td style={{ padding: "8px 10px" }}><Pill color={ETAPA_COLOR[v.etapa]}>{v.etapa}</Pill></td>
-                        <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtMoney(calcSubtotalIVA(v.totalCobrado).subtotal)}</td>
+                        <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>{fmtMoney(getSubtotalPedido(v))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -3104,8 +3366,10 @@ export default function App() {
           initial={modal.mode === "edit" ? modal.data : null}
           onClose={() => setModal(null)}
           onSave={handleSave}
+          onAddPago={handleAddPago}
           catalogos={catalogos}
           clientesConocidos={clientesAgg}
+          ventasExistentes={ventas}
         />
       )}
 
