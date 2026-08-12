@@ -104,7 +104,7 @@ const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov"
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
 const fmtMoney = (n) =>
-  (isFinite(n) ? n : 0).toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
+  (isFinite(n) ? n : 0).toLocaleString("es-MX", { style: "currency", currency: "MXN", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtNum = (n, d = 0) => (isFinite(n) ? n : 0).toLocaleString("es-MX", { maximumFractionDigits: d });
 
@@ -2137,7 +2137,7 @@ export default function App() {
       "M2": v.metrosCuadrados, Color: v.color,
       Acabado: v.acabado, "Estado destino": v.estadoDestino, "Ciudad destino": v.ciudadDestino,
       "Tipo envío": v.tipoEnvio, Fletera: v.fletera, "Total con IVA": v.totalCobrado,
-      "Subtotal sin IVA": Math.round(subtotal), IVA: Math.round(iva), "Forma de pago": v.formaPago,
+      "Subtotal sin IVA": Math.round(subtotal * 100) / 100, IVA: Math.round(iva * 100) / 100, "Forma de pago": v.formaPago,
       Anticipo: v.anticipo, "Saldo pendiente": v.saldoPendiente, "Fecha est. cobro": v.fechaEstimadaCobro,
       "Fecha real cobro": v.fechaRealCobro, Etapa: v.etapa, Observaciones: v.observaciones,
     };
@@ -2487,6 +2487,7 @@ export default function App() {
                 <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
                   {[
                     { id: "tablero", label: "Tablero" },
+                    { id: "lista", label: "Lista" },
                     { id: "panel", label: "Panel" },
                     { id: "recordatorios", label: "Recordatorios", badge: crmRecordatorios.atrasadas.length + crmRecordatorios.hoy.length },
                   ].map((v) => (
@@ -2536,6 +2537,52 @@ export default function App() {
                 </div>
                 <CRMKanbanBoard oportunidades={oportunidadesFiltradas} onStageChange={crmChangeStage} onEdit={(o) => setCrmModal({ mode: "edit", data: o })} />
               </>
+            ) : crmView === "lista" ? (
+              <Card style={{ overflow: "hidden" }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ background: PAPER, textAlign: "left" }}>
+                        {["Cliente", "Empresa / Ciudad", "Teléfono", "Modelo", "Valor", "Etapa", "Próxima acción", "Prioridad", "Seg."].map((h) => (
+                          <th key={h} style={{ padding: "9px 10px", fontSize: 10.5, color: MUTED, fontWeight: 700, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...oportunidadesFiltradas]
+                        .sort((a, b) => {
+                          const fa = a.fechaProximaAccion || "";
+                          const fb = b.fechaProximaAccion || "";
+                          if (!fa && !fb) return 0;
+                          if (!fa) return -1;
+                          if (!fb) return 1;
+                          return fa < fb ? -1 : fa > fb ? 1 : 0;
+                        })
+                        .map((o) => (
+                        <tr
+                          key={o.id}
+                          onClick={() => setCrmModal({ mode: "edit", data: o })}
+                          style={{ borderTop: `1px solid ${LINE}`, cursor: "pointer" }}
+                        >
+                          <td style={{ padding: "8px 10px", fontWeight: 600 }}>{o.cliente}</td>
+                          <td style={{ padding: "8px 10px", color: MUTED }}>{[o.empresa, o.ciudad].filter(Boolean).join(" · ") || "—"}</td>
+                          <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.telefono || "—"}</td>
+                          <td style={{ padding: "8px 10px" }}>{o.modelo || "—"}</td>
+                          <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>{Number(o.valorEstimado) > 0 ? fmtMoney(o.valorEstimado) : "—"}</td>
+                          <td style={{ padding: "8px 10px" }}><Pill color={CRM_ETAPA_COLOR[o.etapa]}>{o.etapa}</Pill></td>
+                          <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
+                            <div>{o.proximaAccion}</div>
+                            <div style={{ fontSize: 10.5, color: (o.fechaProximaAccion || "") < nowLocalISO() ? BAD : MUTED }}>{fmtDateTime(o.fechaProximaAccion)}</div>
+                          </td>
+                          <td style={{ padding: "8px 10px" }}><Pill color={CRM_PRIORIDAD_COLOR[o.prioridad]}>{o.prioridad}</Pill></td>
+                          <td style={{ padding: "8px 10px", textAlign: "center", fontWeight: 700, color: MUTED }}>{(o.seguimientos || []).length}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!oportunidadesFiltradas.length && <EmptyState icon={Users2} title="Sin contactos" sub="Registra tu primera oportunidad con el botón “Nueva oportunidad”." />}
+                </div>
+              </Card>
             ) : crmView === "panel" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
