@@ -1830,8 +1830,6 @@ export default function App() {
   const [quoteModal, setQuoteModal] = useState(null);
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
   const [search, setSearch] = useState("");
-  const [soloConPago, setSoloConPago] = useState(true);
-  const [vistaVentas, setVistaVentas] = useState("tablero");
 
   // --- Estado exclusivo del CRM (independiente de ventas/catalogos) ---
   const [oportunidades, setOportunidades] = useState([]);
@@ -2159,7 +2157,10 @@ export default function App() {
     const list = [];
     ventas.forEach((v) => {
       getPagosPedido(v).forEach((p) => {
-        list.push({ ...p, ventaId: v.id, cliente: v.cliente, modelo: v.modelo, estadoDestino: v.estadoDestino, conIVA: v.conIVA });
+        list.push({
+          ...p, ventaId: v.id, numeroPedido: v.numeroPedido, cliente: v.cliente, empresa: v.empresa,
+          modelo: v.modelo, estadoDestino: v.estadoDestino, ciudadDestino: v.ciudadDestino, conIVA: v.conIVA,
+        });
       });
     });
     return list;
@@ -2425,18 +2426,15 @@ export default function App() {
 
   /* ---------- Búsqueda tabla ventas ---------- */
 
-  const ventasFiltradas = useMemo(() => {
-    let base = ventas;
-    if (soloConPago) base = base.filter((v) => getTotalPagado(v) > 0);
+  const movimientosOrdenados = useMemo(() => {
+    const base = [...movimientosCobro].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
     if (!search.trim()) return base;
     const q = search.toLowerCase();
-    return base.filter((v) =>
-      [v.cliente, v.empresa, v.numeroPedido, v.modelo, v.ciudadDestino, v.estadoDestino]
+    return base.filter((m) =>
+      [m.cliente, m.empresa, m.numeroPedido, m.modelo, m.ciudadDestino, m.estadoDestino]
         .some((f) => (f || "").toLowerCase().includes(q))
     );
-  }, [ventas, search, soloConPago]);
-
-  const ventasOrdenadas = useMemo(() => [...ventasFiltradas].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)), [ventasFiltradas]);
+  }, [movimientosCobro, search]);
 
   /* ============================== NAV ============================== */
 
@@ -3020,62 +3018,7 @@ export default function App() {
                 <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: MUTED }} />
                 <TextInput placeholder="Buscar cliente, pedido, modelo…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
               </div>
-              <button
-                onClick={() => setSoloConPago((v) => !v)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 7, border: `1px solid ${soloConPago ? ACCENT : LINE}`,
-                  background: soloConPago ? `${ACCENT}12` : "#fff", color: soloConPago ? ACCENT : MUTED,
-                  borderRadius: 9, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
-                }}
-                title="Muestra solo pedidos con al menos un pago registrado (oculta prospectos, cotizaciones, negociaciones sin depósito)"
-              >
-                {soloConPago ? <CheckCircle2 size={15} /> : <Circle size={15} />}
-                Solo con pago registrado
-              </button>
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ display: "flex", background: PAPER, borderRadius: 9, padding: 3, border: `1px solid ${LINE}` }}>
-                  <button
-                    onClick={() => setVistaVentas("tablero")}
-                    style={{ border: "none", cursor: "pointer", borderRadius: 7, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, background: vistaVentas === "tablero" ? "#fff" : "transparent", color: vistaVentas === "tablero" ? NAVY : MUTED, boxShadow: vistaVentas === "tablero" ? "0 1px 2px rgba(14,42,71,0.1)" : "none" }}
-                  >
-                    Tablero
-                  </button>
-                  <button
-                    onClick={() => setVistaVentas("lista")}
-                    style={{ border: "none", cursor: "pointer", borderRadius: 7, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, background: vistaVentas === "lista" ? "#fff" : "transparent", color: vistaVentas === "lista" ? NAVY : MUTED, boxShadow: vistaVentas === "lista" ? "0 1px 2px rgba(14,42,71,0.1)" : "none" }}
-                  >
-                    Lista
-                  </button>
-                </div>
-                <Button icon={Plus} onClick={() => setModal({ mode: "new" })}>Nuevo pedido</Button>
-              </div>
-            </div>
-
-            {vistaVentas === "tablero" ? (
-              <>
-                <div style={{ fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 5 }}>
-                  <Layers size={13} /> Arrastra una tarjeta a otra columna para cambiarla de etapa, o haz clic para editarla.
-                </div>
-                <KanbanBoard
-                  ventas={ventasFiltradas}
-                  onStageChange={handleStageChange}
-                  onEdit={(v) => setModal({ mode: "edit", data: v })}
-                />
-              </>
-            ) : (
-              <>
-            {/* Embudo resumen */}
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${ETAPAS.length}, 1fr)`, gap: 8 }}>
-              {ETAPAS.map((e) => {
-                const count = ventas.filter((v) => v.etapa === e).length;
-                return (
-                  <Card key={e} style={{ padding: "10px 8px", textAlign: "center" }}>
-                    <div style={{ width: 8, height: 8, borderRadius: 999, background: ETAPA_COLOR[e], margin: "0 auto 6px" }} />
-                    <div style={{ fontSize: 11, color: MUTED, fontWeight: 600, lineHeight: 1.2 }}>{e}</div>
-                    <div style={{ fontSize: 17, fontWeight: 800, color: INK }}>{count}</div>
-                  </Card>
-                );
-              })}
+              <Button icon={Plus} onClick={() => setModal({ mode: "new" })}>Nuevo pedido</Button>
             </div>
 
             <Card style={{ overflow: "hidden" }}>
@@ -3083,51 +3026,43 @@ export default function App() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: PAPER, textAlign: "left" }}>
-                      {["Fecha", "Pedido", "Cliente", "Modelo", "Subtotal", "Saldo", "Destino", "Etapa", ""].map((h) => (
+                      {["Fecha de pago", "Pedido", "Cliente", "Modelo", "Tipo", "Monto pagado", "Saldo del pedido", "Destino", ""].map((h) => (
                         <th key={h} style={{ padding: "10px 12px", fontSize: 11, color: MUTED, fontWeight: 700, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {ventasOrdenadas.map((v) => {
-                      const subtotal = getSubtotalPedido(v);
-                      const saldo = getSaldoPendiente(v);
-                      const liquidado = getLiquidado(v);
+                    {movimientosOrdenados.map((m) => {
+                      const venta = ventas.find((v) => v.id === m.ventaId);
+                      if (!venta) return null;
+                      const saldo = getSaldoPendiente(venta);
+                      const liquidado = getLiquidado(venta);
                       return (
-                        <tr key={v.id} style={{ borderTop: `1px solid ${LINE}` }}>
-                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: MUTED }}>{fmtDate(v.fecha)}</td>
-                          <td style={{ padding: "10px 12px", fontWeight: 600 }}>{v.numeroPedido}</td>
+                        <tr key={m.id} style={{ borderTop: `1px solid ${LINE}` }}>
+                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: MUTED }}>{fmtDate(m.fecha)}</td>
+                          <td style={{ padding: "10px 12px", fontWeight: 600 }}>{m.numeroPedido}</td>
                           <td style={{ padding: "10px 12px" }}>
-                            <div style={{ fontWeight: 600 }}>{v.cliente}</div>
-                            <div style={{ fontSize: 11.5, color: MUTED }}>{v.empresa}</div>
+                            <div style={{ fontWeight: 600 }}>{m.cliente}</div>
+                            <div style={{ fontSize: 11.5, color: MUTED }}>{m.empresa}</div>
                           </td>
-                          <td style={{ padding: "10px 12px" }}>{v.modelo}</td>
-                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>{fmtMoney(subtotal)}</td>
+                          <td style={{ padding: "10px 12px" }}>{m.modelo}</td>
+                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                            <Pill color={m.tipo === "Finiquito" ? GOOD : m.tipo === "Anticipo" ? ACCENT : WARN}>{m.tipo}</Pill>
+                          </td>
+                          <td style={{ padding: "10px 12px", whiteSpace: "nowrap", fontWeight: 700 }}>{fmtMoney(m.monto)}</td>
                           <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
                             {liquidado
                               ? <Pill color={GOOD}>Liquidado</Pill>
                               : <span style={{ color: saldo > 0 ? WARN : MUTED, fontWeight: 600 }}>{fmtMoney(saldo)}</span>}
                           </td>
                           <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} color={MUTED} />{v.ciudadDestino}, {v.estadoDestino}</div>
-                          </td>
-                          <td style={{ padding: "10px 12px" }}>
-                            <select
-                              value={v.etapa}
-                              onChange={(e) => handleStageChange(v.id, e.target.value)}
-                              style={{
-                                border: "none", borderRadius: 999, padding: "4px 10px", fontSize: 11.5, fontWeight: 700,
-                                color: "#fff", background: ETAPA_COLOR[v.etapa], cursor: "pointer",
-                              }}
-                            >
-                              {ETAPAS.map((e) => <option key={e} value={e} style={{ color: INK, background: "#fff" }}>{e}</option>)}
-                            </select>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} color={MUTED} />{m.ciudadDestino}, {m.estadoDestino}</div>
                           </td>
                           <td style={{ padding: "10px 12px" }}>
                             <div style={{ display: "flex", gap: 6 }}>
-                              <button onClick={() => setQuoteModal(v)} title="Generar cotización" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><FileText size={15} /></button>
-                              <button onClick={() => setModal({ mode: "edit", data: v })} style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><Pencil size={15} /></button>
-                              <button onClick={() => setConfirmDelete(v.id)} style={{ border: "none", background: "transparent", cursor: "pointer", color: BAD }}><Trash2 size={15} /></button>
+                              <button onClick={() => setQuoteModal(venta)} title="Generar cotización" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><FileText size={15} /></button>
+                              <button onClick={() => setModal({ mode: "edit", data: venta })} title="Ver / editar pedido y registrar otro pago" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><Pencil size={15} /></button>
+                              <button onClick={() => setConfirmDelete(venta.id)} title="Eliminar el pedido completo" style={{ border: "none", background: "transparent", cursor: "pointer", color: BAD }}><Trash2 size={15} /></button>
                             </div>
                           </td>
                         </tr>
@@ -3135,11 +3070,9 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
-                {!ventasOrdenadas.length && <EmptyState icon={ClipboardList} title="Sin pedidos" sub="Registra tu primer pedido con el botón “Nuevo pedido”." />}
+                {!movimientosOrdenados.length && <EmptyState icon={ClipboardList} title="Sin ventas" sub="Cuando un pedido tenga su primer pago registrado, aparecerá aquí automáticamente." />}
               </div>
             </Card>
-              </>
-            )}
           </div>
         )}
 
