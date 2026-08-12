@@ -1638,6 +1638,9 @@ export default function App() {
   const [crmConfirmDelete, setCrmConfirmDelete] = useState(null);
   const [crmView, setCrmView] = useState("tablero"); // 'tablero' | 'panel' | 'recordatorios'
   const [searchCRM, setSearchCRM] = useState("");
+  const [crmFiltroEtapa, setCrmFiltroEtapa] = useState("");
+  const [crmFiltroPrioridad, setCrmFiltroPrioridad] = useState("");
+  const [crmOrden, setCrmOrden] = useState("urgencia"); // 'urgencia' | 'valor' | 'cliente'
   const [searchClientes, setSearchClientes] = useState("");
 
   const [reportFilters, setReportFilters] = useState({
@@ -2538,6 +2541,25 @@ export default function App() {
                 <CRMKanbanBoard oportunidades={oportunidadesFiltradas} onStageChange={crmChangeStage} onEdit={(o) => setCrmModal({ mode: "edit", data: o })} />
               </>
             ) : crmView === "lista" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Select value={crmFiltroEtapa} onChange={(e) => setCrmFiltroEtapa(e.target.value)} style={{ width: 190 }}>
+                    <option value="">Todas las etapas</option>
+                    {CRM_ETAPAS.map((e) => <option key={e} value={e}>{e}</option>)}
+                  </Select>
+                  <Select value={crmFiltroPrioridad} onChange={(e) => setCrmFiltroPrioridad(e.target.value)} style={{ width: 160 }}>
+                    <option value="">Todas las prioridades</option>
+                    {CRM_PRIORIDADES.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </Select>
+                  <Select value={crmOrden} onChange={(e) => setCrmOrden(e.target.value)} style={{ width: 200 }}>
+                    <option value="urgencia">Ordenar: más urgente primero</option>
+                    <option value="valor">Ordenar: mayor valor primero</option>
+                    <option value="cliente">Ordenar: cliente (A-Z)</option>
+                  </Select>
+                  {(crmFiltroEtapa || crmFiltroPrioridad) && (
+                    <Button size="sm" variant="ghost" onClick={() => { setCrmFiltroEtapa(""); setCrmFiltroPrioridad(""); }}>Quitar filtros</Button>
+                  )}
+                </div>
               <Card style={{ overflow: "hidden" }}>
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
@@ -2549,8 +2571,12 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {[...oportunidadesFiltradas]
+                      {oportunidadesFiltradas
+                        .filter((o) => !crmFiltroEtapa || o.etapa === crmFiltroEtapa)
+                        .filter((o) => !crmFiltroPrioridad || o.prioridad === crmFiltroPrioridad)
                         .sort((a, b) => {
+                          if (crmOrden === "valor") return (Number(b.valorEstimado) || 0) - (Number(a.valorEstimado) || 0);
+                          if (crmOrden === "cliente") return (a.cliente || "").localeCompare(b.cliente || "");
                           const fa = a.fechaProximaAccion || "";
                           const fb = b.fechaProximaAccion || "";
                           if (!fa && !fb) return 0;
@@ -2583,6 +2609,7 @@ export default function App() {
                   {!oportunidadesFiltradas.length && <EmptyState icon={Users2} title="Sin contactos" sub="Registra tu primera oportunidad con el botón “Nueva oportunidad”." />}
                 </div>
               </Card>
+              </div>
             ) : crmView === "panel" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
