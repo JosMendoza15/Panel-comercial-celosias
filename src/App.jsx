@@ -182,7 +182,7 @@ const getPagosPedido = (v) => {
   if (Array.isArray(v.pagos) && v.pagos.length) return v.pagos;
   if (v.etapa === "Cobrado" && Number(v.totalCobrado) > 0) {
     const { subtotal } = calcSubtotalIVA(v.totalCobrado);
-    return [{ id: `legacy-${v.id}`, fecha: v.fechaRealCobro || v.fecha, monto: round2(subtotal), tipo: "Finiquito" }];
+    return [{ id: `legacy-${v.id}`, fecha: v.fechaRealCobro || v.fecha, monto: round2(subtotal), montoRecibido: Number(v.totalCobrado), conIVA: true, tipo: "Finiquito" }];
   }
   return [];
 };
@@ -909,11 +909,6 @@ const emptyForm = (cat) => ({
   notaSeguimiento: "",
 });
 
-const getTotalConIVADisplay = (v) => {
-  if (Number(v.totalCobrado) > 0) return Number(v.totalCobrado);
-  return getSubtotalPedido(v) * 1.16;
-};
-
 // Resumen de folio + historial de pagos + mini-formulario para registrar un nuevo pago.
 // Se usa tanto cuando se reconoce un folio existente al capturar "Nuevo pedido"
 // como dentro de "Editar pedido".
@@ -923,26 +918,37 @@ function PagosHistorial({ venta, onAddPago, locked }) {
   const totalPagado = getTotalPagado(venta);
   const saldo = getSaldoPendiente(venta);
   const liquidado = getLiquidado(venta);
+  // El pedido "involucra IVA" si así se marcó al crearlo, o si alguno de sus pagos se recibió con IVA.
+  const pedidoTieneIVA = !!venta.conIVA || pagos.some((p) => p.conIVA) || Number(venta.totalCobrado) > 0;
 
   const [fecha, setFecha] = useState(todayISO());
+  const [conIVAPago, setConIVAPago] = useState(!!venta.conIVA);
   const [monto, setMonto] = useState("");
   const [tipo, setTipo] = useState("Pago parcial");
 
-  useEffect(() => {
-    const m = Number(monto) || 0;
-    if (m > 0 && m >= saldo - 0.5) setTipo("Finiquito");
-    else if (m > 0) setTipo((t) => (t === "Finiquito" ? "Pago parcial" : t));
-  }, [monto, saldo]);
+  const montoRecibidoNum = Number(monto) || 0;
+  const montoSubtotalPago = conIVAPago ? montoRecibidoNum / 1.16 : montoRecibidoNum;
 
-  const excede = (Number(monto) || 0) > saldo + 0.01;
+  useEffect(() => {
+    if (montoSubtotalPago > 0 && montoSubtotalPago >= saldo - 0.5) setTipo("Finiquito");
+    else if (montoSubtotalPago > 0) setTipo((t) => (t === "Finiquito" ? "Pago parcial" : t));
+  }, [montoSubtotalPago, saldo]);
+
+  const excede = montoSubtotalPago > saldo + 0.01;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {pedidoTieneIVA && (
+        <div style={{ background: `${ACCENT}0d`, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 10.5, color: ACCENT, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Con IVA (para cotejar con oficina)</div>
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal * 1.16)}</div></div>
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>PAGADO CON IVA</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado * 1.16)}</div></div>
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO CON IVA</div><div style={{ fontWeight: 700, color: liquidado ? GOOD : WARN }}>{fmtMoney(Math.max(0, saldo) * 1.16)}</div></div>
+        </div>
+      )}
       <div style={{ background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SUBTOTAL (IMPORTE ORIGINAL)</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div></div>
-        {(venta.conIVA || Number(venta.totalCobrado) > 0) && (
-          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(getTotalConIVADisplay(venta))}</div></div>
-        )}
+        {pedidoTieneIVA && <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Subtotal (lo que cuenta para tu comisión)</div>}
+        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{pedidoTieneIVA ? "SUBTOTAL" : "VALOR"} (IMPORTE ORIGINAL)</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div></div>
         <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL PAGADO</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado)}</div></div>
         <div>
           <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
@@ -957,7 +963,10 @@ function PagosHistorial({ venta, onAddPago, locked }) {
             <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 12px", fontSize: 12.5, borderTop: `1px solid ${LINE}` }}>
               <span style={{ color: MUTED }}>{fmtDate(p.fecha)}</span>
               <Pill color={p.tipo === "Finiquito" ? GOOD : p.tipo === "Anticipo" ? ACCENT : WARN}>{p.tipo}</Pill>
-              <span style={{ fontWeight: 700 }}>{fmtMoney(p.monto)}</span>
+              <span style={{ textAlign: "right" }}>
+                <div style={{ fontWeight: 700 }}>{fmtMoney(p.conIVA ? (p.montoRecibido != null ? p.montoRecibido : p.monto * 1.16) : p.monto)}{p.conIVA && <span style={{ fontSize: 10.5, color: MUTED, fontWeight: 500 }}> con IVA</span>}</div>
+                {p.conIVA && <div style={{ fontSize: 11, color: MUTED }}>Subtotal: {fmtMoney(p.monto)}</div>}
+              </span>
             </div>
           ))}
         </div>
@@ -966,24 +975,40 @@ function PagosHistorial({ venta, onAddPago, locked }) {
       {!locked && !liquidado && (
         <div style={{ border: `1px dashed ${LINE}`, borderRadius: 10, padding: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
           <Field label="Fecha del pago"><TextInput type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></Field>
-          <Field label="Importe recibido"><TextInput type="number" min="0" value={monto} onChange={(e) => setMonto(e.target.value)} /></Field>
+          <Field label="¿Este pago incluye IVA?">
+            <Select value={conIVAPago ? "si" : "no"} onChange={(e) => setConIVAPago(e.target.value === "si")}>
+              <option value="no">No, sin IVA</option>
+              <option value="si">Sí, con IVA (transferencia)</option>
+            </Select>
+          </Field>
           <Field label="Tipo de movimiento">
             <Select value={tipo} onChange={(e) => setTipo(e.target.value)}>
               {TIPOS_MOVIMIENTO.map((t) => <option key={t}>{t}</option>)}
             </Select>
           </Field>
+          <Field label={conIVAPago ? "Monto recibido (con IVA)" : "Monto recibido"} span={2}>
+            <TextInput type="number" min="0" placeholder="0.00" value={monto} onChange={(e) => setMonto(e.target.value)} />
+          </Field>
+          <div style={{ alignSelf: "end", fontSize: 12, color: MUTED, paddingBottom: 8 }}>
+            {conIVAPago && montoRecibidoNum > 0 && (
+              <>De estos <b style={{ color: INK }}>{fmtMoney(montoRecibidoNum)}</b>, <b style={{ color: INK }}>{fmtMoney(montoSubtotalPago)}</b> son subtotal.</>
+            )}
+          </div>
           {excede && (
             <div style={{ gridColumn: "span 3", fontSize: 12, color: BAD, background: `${BAD}12`, borderRadius: 8, padding: "6px 10px" }}>
-              ⚠ El importe ({fmtMoney(Number(monto) || 0)}) supera el saldo pendiente ({fmtMoney(saldo)}).
+              ⚠ El subtotal de este pago ({fmtMoney(montoSubtotalPago)}) supera el saldo pendiente ({fmtMoney(saldo)}).
             </div>
           )}
           <div style={{ gridColumn: "span 3" }}>
             <Button
               variant="primary" icon={Plus}
-              disabled={!(Number(monto) > 0 && fecha)}
+              disabled={!(montoRecibidoNum > 0 && fecha)}
               onClick={() => {
-                if (excede && !window.confirm(`El pago de ${fmtMoney(Number(monto))} supera el saldo pendiente de ${fmtMoney(saldo)}. ¿Registrarlo de todas formas?`)) return;
-                onAddPago({ id: uid(), fecha, monto: round2(Number(monto)), tipo });
+                if (excede && !window.confirm(`El subtotal de este pago (${fmtMoney(montoSubtotalPago)}) supera el saldo pendiente de ${fmtMoney(saldo)}. ¿Registrarlo de todas formas?`)) return;
+                onAddPago({
+                  id: uid(), fecha, tipo, conIVA: conIVAPago,
+                  montoRecibido: round2(montoRecibidoNum), monto: round2(montoSubtotalPago),
+                });
               }}
             >
               Registrar pago
@@ -1027,7 +1052,8 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
   const subtotalNuevo = form.conIVA ? (Number(form.totalConIVAInput) || 0) / 1.16 : (Number(form.subtotal) || 0);
   const ivaNuevo = form.conIVA ? Math.max(0, (Number(form.totalConIVAInput) || 0) - subtotalNuevo) : 0;
   const anticipoSugerido = round2(subtotalNuevo * ((Number(form.anticipoPct) || 0) / 100));
-  const anticipoNum = round2(Number(form.anticipoCapturado) || 0);
+  const anticipoRecibido = Number(form.anticipoCapturado) || 0;
+  const anticipoNum = round2(form.conIVA ? anticipoRecibido / 1.16 : anticipoRecibido);
   const saldoNuevo = round2(subtotalNuevo - anticipoNum);
 
   const canSaveNuevo = form.cliente.trim() && form.numeroPedido.trim() && form.fecha;
@@ -1038,7 +1064,8 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
     const pagosIniciales = [];
     if (anticipoNum > 0 && form.fechaRealCobro) {
       pagosIniciales.push({
-        id: uid(), fecha: form.fechaRealCobro, monto: anticipoNum,
+        id: uid(), fecha: form.fechaRealCobro, conIVA: !!form.conIVA,
+        montoRecibido: round2(anticipoRecibido), monto: anticipoNum,
         tipo: anticipoNum >= subtotalNuevo - 0.5 ? "Finiquito" : "Anticipo",
       });
     }
@@ -1187,24 +1214,32 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
                   <Field label="% anticipo sugerido (editable)"><TextInput type="number" min="0" max="100" value={form.anticipoPct} onChange={set("anticipoPct")} /></Field>
                   <Field label="Fecha real de cobro (del anticipo)"><TextInput type="date" value={form.fechaRealCobro} onChange={set("fechaRealCobro")} /></Field>
 
-                  <Field label="Anticipo capturado">
-                    <TextInput type="number" min="0" placeholder={anticipoSugerido ? String(round2(anticipoSugerido)) : "0.00"} value={form.anticipoCapturado} onChange={set("anticipoCapturado")} />
+                  <Field label={form.conIVA ? "Anticipo capturado (con IVA)" : "Anticipo capturado"}>
+                    <TextInput type="number" min="0" placeholder={anticipoSugerido ? String(round2(form.conIVA ? anticipoSugerido * 1.16 : anticipoSugerido)) : "0.00"} value={form.anticipoCapturado} onChange={set("anticipoCapturado")} />
                   </Field>
                   <div style={{ alignSelf: "end", fontSize: 12, color: MUTED, paddingBottom: 8 }}>
-                    Sugerido ({form.anticipoPct || 0}%): <b style={{ color: INK }}>{fmtMoney(anticipoSugerido)}</b>
+                    Sugerido ({form.anticipoPct || 0}%): <b style={{ color: INK }}>{fmtMoney(form.conIVA ? anticipoSugerido * 1.16 : anticipoSugerido)}</b>
+                    {form.conIVA && anticipoRecibido > 0 && <> · de eso, <b style={{ color: INK }}>{fmtMoney(anticipoNum)}</b> son subtotal</>}
                   </div>
 
+                  {form.conIVA && (
+                    <div style={{ gridColumn: "span 2", background: `${ACCENT}0d`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 10.5, color: ACCENT, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Con IVA (para cotejar con oficina)</div>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo * 1.16)}</div></div>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>ANTICIPO CON IVA</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(anticipoRecibido)}</div></div>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO CON IVA</div><div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo) * 1.16)}</div></div>
+                    </div>
+                  )}
                   <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+                    {form.conIVA && <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Subtotal (lo que cuenta para tu comisión)</div>}
                     <div>
-                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SUBTOTAL SIN IVA</div>
+                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{form.conIVA ? "SUBTOTAL" : "VALOR"}</div>
                       <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo)}</div>
                     </div>
-                    {form.conIVA && (
-                      <div>
-                        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>IVA (16%)</div>
-                        <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(ivaNuevo)}</div>
-                      </div>
-                    )}
+                    <div>
+                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{form.conIVA ? "ANTICIPO SUBTOTAL" : "ANTICIPO"}</div>
+                      <div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(anticipoNum)}</div>
+                    </div>
                     <div>
                       <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
                       <div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo))}</div>
