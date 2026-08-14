@@ -938,23 +938,38 @@ function PagosHistorial({ venta, onAddPago, locked }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {pedidoTieneIVA && (
-        <div style={{ background: `${ACCENT}0d`, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 10.5, color: ACCENT, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Con IVA (para cotejar con oficina)</div>
-          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal * 1.16)}</div></div>
-          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>PAGADO CON IVA</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado * 1.16)}</div></div>
-          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO CON IVA</div><div style={{ fontWeight: 700, color: liquidado ? GOOD : WARN }}>{fmtMoney(Math.max(0, saldo) * 1.16)}</div></div>
+      {pedidoTieneIVA ? (
+        <div style={{ background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 26, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL DEL PEDIDO (CON IVA)</div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(subtotal * 1.16)}</div>
+            <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(subtotal)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>PAGADO (CON IVA)</div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(totalPagado * 1.16)}</div>
+            <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(totalPagado)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE (CON IVA)</div>
+            {liquidado ? <Pill color={GOOD}>Liquidado</Pill> : (
+              <>
+                <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(Math.max(0, saldo) * 1.16)}</div>
+                <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(saldo)}</div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>VALOR (IMPORTE ORIGINAL)</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div></div>
+          <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>PAGADO</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado)}</div></div>
+          <div>
+            <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
+            {liquidado ? <Pill color={GOOD}>Liquidado</Pill> : <div style={{ fontWeight: 700, color: WARN }}>{fmtMoney(saldo)}</div>}
+          </div>
         </div>
       )}
-      <div style={{ background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-        {pedidoTieneIVA && <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Subtotal (lo que cuenta para tu comisión)</div>}
-        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{pedidoTieneIVA ? "SUBTOTAL" : "VALOR"} (IMPORTE ORIGINAL)</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotal)}</div></div>
-        <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL PAGADO</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(totalPagado)}</div></div>
-        <div>
-          <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
-          {liquidado ? <Pill color={GOOD}>Liquidado</Pill> : <div style={{ fontWeight: 700, color: WARN }}>{fmtMoney(saldo)}</div>}
-        </div>
-      </div>
 
       {pagos.length > 0 && (
         <div style={{ border: `1px solid ${LINE}`, borderRadius: 10, overflow: "hidden" }}>
@@ -1222,29 +1237,31 @@ function SaleModal({ initial, onClose, onSave, onAddPago, catalogos, clientesCon
                     {form.conIVA && anticipoRecibido > 0 && <> · de eso, <b style={{ color: INK }}>{fmtMoney(anticipoNum)}</b> son subtotal</>}
                   </div>
 
-                  {form.conIVA && (
-                    <div style={{ gridColumn: "span 2", background: `${ACCENT}0d`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-                      <div style={{ fontSize: 10.5, color: ACCENT, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Con IVA (para cotejar con oficina)</div>
-                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL CON IVA</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo * 1.16)}</div></div>
-                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>ANTICIPO CON IVA</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(anticipoRecibido)}</div></div>
-                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO CON IVA</div><div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo) * 1.16)}</div></div>
+                  {form.conIVA ? (
+                    <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "12px 14px", display: "flex", gap: 26, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>TOTAL DEL PEDIDO (CON IVA)</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(subtotalNuevo * 1.16)}</div>
+                        <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(subtotalNuevo)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>ANTICIPO (CON IVA)</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(anticipoRecibido)}</div>
+                        <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(anticipoNum)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE (CON IVA)</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: ACCENT }}>{fmtMoney(Math.max(0, saldoNuevo) * 1.16)}</div>
+                        <div style={{ fontSize: 11.5, color: GOOD, fontWeight: 600 }}>Subtotal: {fmtMoney(Math.max(0, saldoNuevo))}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>VALOR</div><div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo)}</div></div>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>ANTICIPO</div><div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(anticipoNum)}</div></div>
+                      <div><div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div><div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo))}</div></div>
                     </div>
                   )}
-                  <div style={{ gridColumn: "span 2", background: PAPER, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 22, flexWrap: "wrap" }}>
-                    {form.conIVA && <div style={{ fontSize: 10.5, color: MUTED, fontWeight: 800, textTransform: "uppercase", width: "100%" }}>Subtotal (lo que cuenta para tu comisión)</div>}
-                    <div>
-                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{form.conIVA ? "SUBTOTAL" : "VALOR"}</div>
-                      <div style={{ fontWeight: 700, color: INK }}>{fmtMoney(subtotalNuevo)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>{form.conIVA ? "ANTICIPO SUBTOTAL" : "ANTICIPO"}</div>
-                      <div style={{ fontWeight: 700, color: GOOD }}>{fmtMoney(anticipoNum)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>SALDO PENDIENTE</div>
-                      <div style={{ fontWeight: 700, color: saldoNuevo > 0 ? WARN : GOOD }}>{fmtMoney(Math.max(0, saldoNuevo))}</div>
-                    </div>
-                  </div>
                   <div style={{ gridColumn: "span 2", fontSize: 11.5, color: MUTED }}>
                     La comisión siempre se calcula sobre el subtotal sin IVA, nunca sobre el total con IVA.
                   </div>
