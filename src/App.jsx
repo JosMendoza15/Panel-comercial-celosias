@@ -393,6 +393,51 @@ async function supaReplaceTable(table, rows) {
   }
 }
 
+function notaToRow(n) {
+  return { id: n.id, fecha: n.fecha || null, hora: n.hora, texto: n.texto, creado_en: n.creadoEn || null };
+}
+function rowToNota(r) {
+  return { id: r.id, fecha: r.fecha, hora: r.hora, texto: r.texto, creadoEn: r.creado_en };
+}
+
+const NOTAS_STORAGE_KEY = "notas-agenda-v1";
+
+async function loadNotas() {
+  if (currentSession) {
+    try {
+      const rows = await supaSelect("notas");
+      if (rows.length > 0) {
+        const notas = rows.map(rowToNota);
+        await storage.set(NOTAS_STORAGE_KEY, JSON.stringify(notas), false).catch(() => {});
+        return notas;
+      }
+      const localRes = await storage.get(NOTAS_STORAGE_KEY, false).catch(() => null);
+      const local = localRes && localRes.value ? JSON.parse(localRes.value) : null;
+      if (Array.isArray(local) && local.length) {
+        await supaReplaceTable("notas", local.map(notaToRow)).catch((e) => console.error("No se pudo subir a Supabase", e));
+        return local;
+      }
+      return [];
+    } catch (e) {
+      console.error("Fallo Supabase, usando copia local", e);
+    }
+  }
+  try {
+    const res = await storage.get(NOTAS_STORAGE_KEY, false);
+    if (res && res.value) return JSON.parse(res.value);
+    return null;
+  } catch (e) { return null; }
+}
+async function saveNotas(data) {
+  try { await storage.set(NOTAS_STORAGE_KEY, JSON.stringify(data), false); }
+  catch (e) { console.error("No se pudo guardar localmente", e); }
+  if (currentSession) {
+    try { await supaReplaceTable("notas", data.map(notaToRow)); }
+    catch (e) { console.error("No se pudo sincronizar las notas con Supabase", e); return false; }
+  }
+  return true;
+}
+
 function ventaToRow(v) {
   return {
     id: v.id, fecha: v.fecha || null, numero_pedido: v.numeroPedido, cliente: v.cliente, empresa: v.empresa,
@@ -587,6 +632,101 @@ function Card({ children, style, className = "" }) {
     >
       {children}
     </div>
+  );
+}
+
+// Agenda de notas: cada anotación queda con su hora automática, agrupada por día.
+// Navegación entre días + buscador para encontrar notas de días anteriores.
+function NotasWidget({ notas, onAdd, onDelete }) {
+  const [fechaVista, setFechaVista] = useState(todayISO());
+  const [texto, setTexto] = useState("");
+  const [busqueda, setBusqueda] = useState("");
+
+  const esHoy = fechaVista === todayISO();
+  const cambiarDia = (delta) => {
+    const d = new Date(fechaVista + "T12:00:00");
+    d.setDate(d.getDate() + delta);
+    setFechaVista(d.toISOString().slice(0, 10));
+  };
+
+  const notasDelDia = useMemo(
+    () => notas.filter((n) => n.fecha === fechaVista).sort((a, b) => (a.creadoEn || "").localeCompare(b.creadoEn || "")),
+    [notas, fechaVista]
+  );
+
+  const resultadosBusqueda = useMemo(() => {
+    if (!busqueda.trim()) return null;
+    const q = busqueda.toLowerCase();
+    return [...notas]
+      .filter((n) => (n.texto || "").toLowerCase().includes(q))
+      .sort((a, b) => (b.creadoEn || "").localeCompare(a.creadoEn || ""))
+      .slice(0, 30);
+  }, [notas, busqueda]);
+
+  const enviar = () => {
+    if (!texto.trim()) return;
+    onAdd(texto);
+    setTexto("");
+  };
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <FileText size={16} color={ACCENT} />
+          <span style={{ fontWeight: 700, fontSize: 14.5, color: INK }}>Notas</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button onClick={() => cambiarDia(-1)} style={{ border: `1px solid ${LINE}`, background: "#fff", borderRadius: 7, cursor: "pointer", padding: "4px 8px", color: MUTED }}>‹</button>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: INK, minWidth: 130, textAlign: "center" }}>
+            {esHoy ? "Hoy · " : ""}{fmtDate(fechaVista)}
+          </span>
+          <button onClick={() => cambiarDia(1)} style={{ border: `1px solid ${LINE}`, background: "#fff", borderRadius: 7, cursor: "pointer", padding: "4px 8px", color: MUTED }}>›</button>
+          {!esHoy && <Button size="sm" variant="ghost" onClick={() => setFechaVista(todayISO())}>Hoy</Button>}
+        </div>
+      </div>
+
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <Search size={14} style={{ position: "absolute", left: 9, top: 9, color: MUTED }} />
+        <TextInput placeholder="Buscar en todas tus notas…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} style={{ paddingLeft: 30 }} />
+      </div>
+
+      {resultadosBusqueda ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+          {resultadosBusqueda.length === 0 && <div style={{ fontSize: 12.5, color: MUTED, padding: "8px 0" }}>Sin resultados.</div>}
+          {resultadosBusqueda.map((n) => (
+            <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px", display: "flex", gap: 8 }}>
+              <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}>{fmtDate(n.fecha)} · {n.hora}</span>
+              <span style={{ color: INK }}>{n.texto}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", marginBottom: 10 }}>
+            {!notasDelDia.length && <div style={{ fontSize: 12.5, color: MUTED, padding: "8px 0" }}>Sin notas este día.</div>}
+            {notasDelDia.map((n) => (
+              <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{n.hora}</span>
+                <span style={{ color: INK, flex: 1 }}>{n.texto}</span>
+                <button onClick={() => onDelete(n.id)} title="Eliminar" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED, flexShrink: 0 }}><X size={13} /></button>
+              </div>
+            ))}
+          </div>
+          {esHoy && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <TextInput
+                placeholder="Escribe una nota y presiona Enter…"
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") enviar(); }}
+              />
+              <Button icon={Plus} onClick={enviar} disabled={!texto.trim()}>Agregar</Button>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -1874,6 +2014,7 @@ function CRMKanbanBoard({ oportunidades, onStageChange, onEdit }) {
 
 export default function App() {
   const [ventas, setVentas] = useState([]);
+  const [notas, setNotas] = useState([]);
   const [catalogos, setCatalogos] = useState(DEFAULT_CATALOGOS);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -1974,10 +2115,17 @@ export default function App() {
     })();
   }, []);
 
+  const reloadNotas = useCallback(async () => {
+    const data = await loadNotas();
+    if (Array.isArray(data)) setNotas(data);
+    else setNotas([]);
+  }, []);
+
   useEffect(() => {
     if (!authReady) return;
     reloadVentasYCatalogos();
     reloadCRM();
+    reloadNotas();
   }, [authReady, session]);
 
   const handleLogin = async (email, password) => {
@@ -2197,6 +2345,33 @@ export default function App() {
         };
       });
       saveToStorage(next);
+      return next;
+    });
+  };
+
+  /* ---------- Notas (agenda del día) ---------- */
+
+  const handleAddNota = (texto) => {
+    if (!texto.trim()) return;
+    const now = new Date();
+    const nueva = {
+      id: uid(),
+      fecha: todayISO(),
+      hora: now.toLocaleTimeString("es-MX", { hour: "numeric", minute: "2-digit", hour12: true }),
+      texto: texto.trim(),
+      creadoEn: now.toISOString(),
+    };
+    setNotas((prev) => {
+      const next = [...prev, nueva];
+      saveNotas(next);
+      return next;
+    });
+  };
+
+  const handleDeleteNota = (id) => {
+    setNotas((prev) => {
+      const next = prev.filter((n) => n.id !== id);
+      saveNotas(next);
       return next;
     });
   };
@@ -2658,6 +2833,8 @@ export default function App() {
                 {tierSiguiente ? <span>Faltan {fmtMoney(faltanteSiguiente)} para {tierSiguiente.pct.toFixed(2)}%</span> : <span>Nivel máximo alcanzado (3.50%)</span>}
               </div>
             </Card>
+
+            <NotasWidget notas={notas} onAdd={handleAddNota} onDelete={handleDeleteNota} />
 
             {/* Stat cards */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
