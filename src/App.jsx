@@ -637,10 +637,12 @@ function Card({ children, style, className = "" }) {
 
 // Agenda de notas: cada anotación queda con su hora automática, agrupada por día.
 // Navegación entre días + buscador para encontrar notas de días anteriores.
-function NotasWidget({ notas, onAdd, onDelete }) {
+function NotasWidget({ notas, onAdd, onEdit, onDelete }) {
   const [fechaVista, setFechaVista] = useState(todayISO());
   const [texto, setTexto] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  const [editandoId, setEditandoId] = useState(null);
+  const [textoEdicion, setTextoEdicion] = useState("");
 
   const esHoy = fechaVista === todayISO();
   const cambiarDia = (delta) => {
@@ -669,6 +671,39 @@ function NotasWidget({ notas, onAdd, onDelete }) {
     setTexto("");
   };
 
+  const empezarEdicion = (n) => { setEditandoId(n.id); setTextoEdicion(n.texto); };
+  const guardarEdicion = () => {
+    if (!textoEdicion.trim()) return;
+    onEdit(editandoId, textoEdicion);
+    setEditandoId(null);
+    setTextoEdicion("");
+  };
+
+  const renderNota = (n, mostrarFecha) => (
+    <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px" }}>
+      {editandoId === n.id ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <TextArea value={textoEdicion} onChange={(e) => setTextoEdicion(e.target.value)} style={{ minHeight: 70, fontSize: 12.5 }} autoFocus />
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+            <Button size="sm" variant="ghost" onClick={() => setEditandoId(null)}>Cancelar</Button>
+            <Button size="sm" onClick={guardarEdicion} disabled={!textoEdicion.trim()}>Guardar</Button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}>{mostrarFecha ? `${fmtDate(n.fecha)} · ` : ""}{n.hora}</span>
+          <span style={{ color: INK, flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{n.texto}</span>
+          {!mostrarFecha && (
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button onClick={() => empezarEdicion(n)} title="Editar" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><Pencil size={13} /></button>
+              <button onClick={() => onDelete(n.id)} title="Eliminar" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><X size={13} /></button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <Card style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
@@ -694,32 +729,22 @@ function NotasWidget({ notas, onAdd, onDelete }) {
       {resultadosBusqueda ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto" }}>
           {resultadosBusqueda.length === 0 && <div style={{ fontSize: 12.5, color: MUTED, padding: "8px 0" }}>Sin resultados.</div>}
-          {resultadosBusqueda.map((n) => (
-            <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px", display: "flex", gap: 8 }}>
-              <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}>{fmtDate(n.fecha)} · {n.hora}</span>
-              <span style={{ color: INK }}>{n.texto}</span>
-            </div>
-          ))}
+          {resultadosBusqueda.map((n) => renderNota(n, true))}
         </div>
       ) : (
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 220, overflowY: "auto", marginBottom: 10 }}>
             {!notasDelDia.length && <div style={{ fontSize: 12.5, color: MUTED, padding: "8px 0" }}>Sin notas este día.</div>}
-            {notasDelDia.map((n) => (
-              <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{n.hora}</span>
-                <span style={{ color: INK, flex: 1 }}>{n.texto}</span>
-                <button onClick={() => onDelete(n.id)} title="Eliminar" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED, flexShrink: 0 }}><X size={13} /></button>
-              </div>
-            ))}
+            {notasDelDia.map((n) => renderNota(n, false))}
           </div>
           {esHoy && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <TextInput
-                placeholder="Escribe una nota y presiona Enter…"
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <TextArea
+                placeholder="Escribe una nota (puedes usar varios renglones)… Ctrl+Enter para agregar"
                 value={texto}
                 onChange={(e) => setTexto(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") enviar(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) enviar(); }}
+                style={{ minHeight: 44 }}
               />
               <Button icon={Plus} onClick={enviar} disabled={!texto.trim()}>Agregar</Button>
             </div>
@@ -1702,6 +1727,8 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
   const [accionSeguimientoNuevo, setAccionSeguimientoNuevo] = useState(form.proximaAccion || acciones[0] || "");
   const [fechaCustomSeguimiento, setFechaCustomSeguimiento] = useState("");
   const [mostrarCustom, setMostrarCustom] = useState(false);
+  const [editandoSeguimientoId, setEditandoSeguimientoId] = useState(null);
+  const [textoEdicionSeguimiento, setTextoEdicionSeguimiento] = useState("");
 
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
@@ -1737,6 +1764,18 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
     const actualizado = { ...form, seguimientos: (form.seguimientos || []).filter((s) => s.id !== id) };
     setForm(actualizado);
     onSave(actualizado);
+  };
+
+  const empezarEdicionSeguimiento = (s) => { setEditandoSeguimientoId(s.id); setTextoEdicionSeguimiento(s.nota || ""); };
+  const guardarEdicionSeguimiento = () => {
+    const actualizado = {
+      ...form,
+      seguimientos: (form.seguimientos || []).map((s) => (s.id === editandoSeguimientoId ? { ...s, nota: textoEdicionSeguimiento.trim() } : s)),
+    };
+    setForm(actualizado);
+    onSave(actualizado);
+    setEditandoSeguimientoId(null);
+    setTextoEdicionSeguimiento("");
   };
 
   return (
@@ -1829,10 +1868,26 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
               {(form.seguimientos || []).length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: mostrarSeguimiento ? 12 : 0, maxHeight: 140, overflowY: "auto" }}>
                   {[...(form.seguimientos || [])].reverse().map((s) => (
-                    <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{fmtDateTime(s.fecha)}</span>
-                      <span style={{ color: INK, flex: 1 }}>{s.nota || "Seguimiento registrado (sin nota)"}</span>
-                      <button onClick={() => eliminarSeguimiento(s.id)} title="Eliminar este seguimiento" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED, flexShrink: 0 }}><X size={13} /></button>
+                    <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px" }}>
+                      {editandoSeguimientoId === s.id ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <span style={{ color: MUTED, fontWeight: 600 }}>{fmtDateTime(s.fecha)}</span>
+                          <TextArea value={textoEdicionSeguimiento} onChange={(e) => setTextoEdicionSeguimiento(e.target.value)} style={{ minHeight: 60, fontSize: 12 }} autoFocus />
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                            <Button size="sm" variant="ghost" onClick={() => setEditandoSeguimientoId(null)}>Cancelar</Button>
+                            <Button size="sm" onClick={guardarEdicionSeguimiento}>Guardar</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                          <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{fmtDateTime(s.fecha)}</span>
+                          <span style={{ color: INK, flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{s.nota || "Seguimiento registrado (sin nota)"}</span>
+                          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                            <button onClick={() => empezarEdicionSeguimiento(s)} title="Editar" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><Pencil size={13} /></button>
+                            <button onClick={() => eliminarSeguimiento(s.id)} title="Eliminar este seguimiento" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}><X size={13} /></button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2385,6 +2440,14 @@ export default function App() {
     });
   };
 
+  const handleEditNota = (id, nuevoTexto) => {
+    setNotas((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, texto: nuevoTexto.trim() } : n));
+      saveNotas(next);
+      return next;
+    });
+  };
+
   /* ---------- Derivados generales ---------- */
 
   // Cada pago (anticipo/parcial/finiquito) de cada folio es un "movimiento de cobro"
@@ -2843,7 +2906,7 @@ export default function App() {
               </div>
             </Card>
 
-            <NotasWidget notas={notas} onAdd={handleAddNota} onDelete={handleDeleteNota} />
+            <NotasWidget notas={notas} onAdd={handleAddNota} onEdit={handleEditNota} onDelete={handleDeleteNota} />
 
             {/* Stat cards */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
