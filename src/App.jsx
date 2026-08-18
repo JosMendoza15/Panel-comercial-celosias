@@ -1961,11 +1961,23 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
               onClick={() => {
                 const accionFinal = usarPersonalizada ? accionPersonalizada.trim() : form.proximaAccion;
                 if (usarPersonalizada && accionFinal && !acciones.includes(accionFinal)) onAddAccion(accionFinal);
+
+                // Si la fecha de "Último contacto" es nueva (o cambió) y todavía no está
+                // en el historial, se registra sola como un seguimiento, sin texto.
+                let seguimientosFinal = form.seguimientos || [];
+                const contactoCambio = !initial || initial.fechaUltimoContacto !== form.fechaUltimoContacto;
+                const yaRegistrado = seguimientosFinal.some((s) => (s.fecha || "").slice(0, 10) === form.fechaUltimoContacto);
+                if (form.fechaUltimoContacto && contactoCambio && !yaRegistrado) {
+                  const horaActual = form.fechaUltimoContacto === todayISO() ? nowLocalISO().slice(11) : "12:00";
+                  seguimientosFinal = [...seguimientosFinal, { id: uid(), fecha: `${form.fechaUltimoContacto}T${horaActual}`, nota: "" }];
+                }
+
                 onSave({
                   ...form,
                   id: form.id || uid(),
                   proximaAccion: accionFinal,
                   valorEstimado: form.valorEstimado === "" ? 0 : Number(form.valorEstimado),
+                  seguimientos: seguimientosFinal,
                 });
               }}
             >
