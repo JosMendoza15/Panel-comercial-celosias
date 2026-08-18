@@ -1728,6 +1728,14 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
       fechaProximaAccion: nuevaFechaAccion,
       valorEstimado: form.valorEstimado === "" ? 0 : Number(form.valorEstimado),
     };
+    setForm(actualizado);
+    onSave(actualizado);
+  };
+
+  const eliminarSeguimiento = (id) => {
+    if (!window.confirm("¿Eliminar este seguimiento del historial?")) return;
+    const actualizado = { ...form, seguimientos: (form.seguimientos || []).filter((s) => s.id !== id) };
+    setForm(actualizado);
     onSave(actualizado);
   };
 
@@ -1821,9 +1829,10 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
               {(form.seguimientos || []).length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: mostrarSeguimiento ? 12 : 0, maxHeight: 140, overflowY: "auto" }}>
                   {[...(form.seguimientos || [])].reverse().map((s) => (
-                    <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 8 }}>
+                    <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px", display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ color: MUTED, fontWeight: 600, flexShrink: 0 }}>{fmtDateTime(s.fecha)}</span>
-                      <span style={{ color: INK }}>{s.nota || "Seguimiento registrado (sin nota)"}</span>
+                      <span style={{ color: INK, flex: 1 }}>{s.nota || "Seguimiento registrado (sin nota)"}</span>
+                      <button onClick={() => eliminarSeguimiento(s.id)} title="Eliminar este seguimiento" style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED, flexShrink: 0 }}><X size={13} /></button>
                     </div>
                   ))}
                 </div>
