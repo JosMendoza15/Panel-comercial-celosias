@@ -643,6 +643,8 @@ function NotasWidget({ notas, onAdd, onEdit, onDelete }) {
   const [busqueda, setBusqueda] = useState("");
   const [editandoId, setEditandoId] = useState(null);
   const [textoEdicion, setTextoEdicion] = useState("");
+  const [fechaEdicion, setFechaEdicion] = useState("");
+  const [horaEdicion, setHoraEdicion] = useState("");
 
   const esHoy = fechaVista === todayISO();
   const cambiarDia = (delta) => {
@@ -671,10 +673,22 @@ function NotasWidget({ notas, onAdd, onEdit, onDelete }) {
     setTexto("");
   };
 
-  const empezarEdicion = (n) => { setEditandoId(n.id); setTextoEdicion(n.texto); };
+  const empezarEdicion = (n) => {
+    setEditandoId(n.id);
+    setTextoEdicion(n.texto);
+    setFechaEdicion(n.fecha || todayISO());
+    const base = n.creadoEn ? new Date(n.creadoEn) : new Date(`${n.fecha}T12:00`);
+    setHoraEdicion(isNaN(base) ? "12:00" : base.toTimeString().slice(0, 5));
+  };
   const guardarEdicion = () => {
-    if (!textoEdicion.trim()) return;
-    onEdit(editandoId, textoEdicion);
+    if (!textoEdicion.trim() || !fechaEdicion || !horaEdicion) return;
+    const nuevaFechaHora = new Date(`${fechaEdicion}T${horaEdicion}`);
+    onEdit(editandoId, {
+      texto: textoEdicion,
+      fecha: fechaEdicion,
+      hora: isNaN(nuevaFechaHora) ? "" : nuevaFechaHora.toLocaleTimeString("es-MX", { hour: "numeric", minute: "2-digit", hour12: true }),
+      creadoEn: isNaN(nuevaFechaHora) ? null : nuevaFechaHora.toISOString(),
+    });
     setEditandoId(null);
     setTextoEdicion("");
   };
@@ -683,10 +697,14 @@ function NotasWidget({ notas, onAdd, onEdit, onDelete }) {
     <div key={n.id} style={{ fontSize: 12.5, background: PAPER, borderRadius: 8, padding: "7px 10px" }}>
       {editandoId === n.id ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <TextInput type="date" value={fechaEdicion} onChange={(e) => setFechaEdicion(e.target.value)} style={{ flex: 1 }} />
+            <TextInput type="time" value={horaEdicion} onChange={(e) => setHoraEdicion(e.target.value)} style={{ flex: 1 }} />
+          </div>
           <TextArea value={textoEdicion} onChange={(e) => setTextoEdicion(e.target.value)} style={{ minHeight: 70, fontSize: 12.5 }} autoFocus />
           <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
             <Button size="sm" variant="ghost" onClick={() => setEditandoId(null)}>Cancelar</Button>
-            <Button size="sm" onClick={guardarEdicion} disabled={!textoEdicion.trim()}>Guardar</Button>
+            <Button size="sm" onClick={guardarEdicion} disabled={!textoEdicion.trim() || !fechaEdicion || !horaEdicion}>Guardar</Button>
           </div>
         </div>
       ) : (
@@ -1729,6 +1747,7 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
   const [mostrarCustom, setMostrarCustom] = useState(false);
   const [editandoSeguimientoId, setEditandoSeguimientoId] = useState(null);
   const [textoEdicionSeguimiento, setTextoEdicionSeguimiento] = useState("");
+  const [fechaEdicionSeguimiento, setFechaEdicionSeguimiento] = useState("");
 
   const set = (k) => (e) => {
     const val = e && e.target ? e.target.value : e;
@@ -1766,11 +1785,15 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
     onSave(actualizado);
   };
 
-  const empezarEdicionSeguimiento = (s) => { setEditandoSeguimientoId(s.id); setTextoEdicionSeguimiento(s.nota || ""); };
+  const empezarEdicionSeguimiento = (s) => {
+    setEditandoSeguimientoId(s.id);
+    setTextoEdicionSeguimiento(s.nota || "");
+    setFechaEdicionSeguimiento(s.fecha || nowLocalISO());
+  };
   const guardarEdicionSeguimiento = () => {
     const actualizado = {
       ...form,
-      seguimientos: (form.seguimientos || []).map((s) => (s.id === editandoSeguimientoId ? { ...s, nota: textoEdicionSeguimiento.trim() } : s)),
+      seguimientos: (form.seguimientos || []).map((s) => (s.id === editandoSeguimientoId ? { ...s, nota: textoEdicionSeguimiento.trim(), fecha: fechaEdicionSeguimiento } : s)),
     };
     setForm(actualizado);
     onSave(actualizado);
@@ -1871,7 +1894,7 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
                     <div key={s.id} style={{ fontSize: 12, background: PAPER, borderRadius: 8, padding: "6px 10px" }}>
                       {editandoSeguimientoId === s.id ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span style={{ color: MUTED, fontWeight: 600 }}>{fmtDateTime(s.fecha)}</span>
+                          <TextInput type="datetime-local" value={fechaEdicionSeguimiento} onChange={(e) => setFechaEdicionSeguimiento(e.target.value)} style={{ fontSize: 12 }} />
                           <TextArea value={textoEdicionSeguimiento} onChange={(e) => setTextoEdicionSeguimiento(e.target.value)} style={{ minHeight: 60, fontSize: 12 }} autoFocus />
                           <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                             <Button size="sm" variant="ghost" onClick={() => setEditandoSeguimientoId(null)}>Cancelar</Button>
@@ -2440,9 +2463,9 @@ export default function App() {
     });
   };
 
-  const handleEditNota = (id, nuevoTexto) => {
+  const handleEditNota = (id, cambios) => {
     setNotas((prev) => {
-      const next = prev.map((n) => (n.id === id ? { ...n, texto: nuevoTexto.trim() } : n));
+      const next = prev.map((n) => (n.id === id ? { ...n, ...cambios, texto: (cambios.texto || "").trim() } : n));
       saveNotas(next);
       return next;
     });
