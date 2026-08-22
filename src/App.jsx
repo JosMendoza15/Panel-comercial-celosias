@@ -5,7 +5,7 @@ import {
   TrendingUp, Target, Wallet, Receipt, Package, Ruler, Users2, ShoppingCart,
   ArrowUpRight, ArrowDownRight, Clock, MapPin, Truck, Phone, Mail, Building2,
   CheckCircle2, AlertTriangle, CalendarClock, Sparkles, FileSpreadsheet, Printer,
-  Layers, Palette, Wrench, Droplet, CreditCard, FileText, RefreshCw, Circle
+  Layers, Palette, Wrench, Droplet, CreditCard, FileText, RefreshCw, Circle, Star
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -474,7 +474,8 @@ function oportunidadToRow(o) {
     valor_estimado: o.valorEstimado, fecha_ultimo_contacto: o.fechaUltimoContacto || null,
     proxima_accion: o.proximaAccion, fecha_proxima_accion: o.fechaProximaAccion || null,
     prioridad: o.prioridad, notas: o.notas, etapa: o.etapa, seguimientos: o.seguimientos || [],
-    modelo: o.modelo || "", motivo_perdida: o.motivoPerdida || "",
+    modelo: o.modelo || "", motivo_perdida: o.motivoPerdida || "", favorito: !!o.favorito,
+    alcance: o.alcance || "Local",
   };
 }
 function rowToOportunidad(r) {
@@ -484,6 +485,7 @@ function rowToOportunidad(r) {
     proximaAccion: r.proxima_accion, fechaProximaAccion: r.fecha_proxima_accion,
     prioridad: r.prioridad, notas: r.notas, etapa: r.etapa, creadoEn: r.creado_en,
     seguimientos: r.seguimientos || [], modelo: r.modelo || "", motivoPerdida: r.motivo_perdida || "",
+    favorito: !!r.favorito, alcance: r.alcance || "Local",
   };
 }
 
@@ -1581,6 +1583,8 @@ const CRM_ETAPA_COLOR = {
 };
 const CRM_PRIORIDADES = ["Alta", "Media", "Baja"];
 const CRM_PRIORIDAD_COLOR = { Alta: BAD, Media: WARN, Baja: MUTED };
+const CRM_ALCANCE = ["Local", "Nacional", "Internacional"];
+const CRM_ALCANCE_COLOR = { Local: GOOD, Nacional: ACCENT, Internacional: WARN };
 
 const DEFAULT_ACCIONES_CRM = [
   "Solicitar información", "Solicitar medidas", "Solicitar dirección", "Cotizar flete",
@@ -1732,6 +1736,8 @@ const emptyOpportunity = (acciones) => ({
   seguimientos: [],
   modelo: "",
   motivoPerdida: "",
+  favorito: false,
+  alcance: "Local",
 });
 
 function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddAccion }) {
@@ -1808,8 +1814,19 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
     }}>
       <Card style={{ width: "100%", maxWidth: 640, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#fff", zIndex: 2 }}>
-          <div style={{ fontWeight: 700, fontSize: 15.5, color: INK }}>
+          <div style={{ fontWeight: 700, fontSize: 15.5, color: INK, display: "flex", alignItems: "center", gap: 10 }}>
             {initial ? "Editar oportunidad" : "Nueva oportunidad"}
+            <button
+              onClick={() => {
+                const actualizado = { ...form, favorito: !form.favorito };
+                setForm(actualizado);
+                if (initial) onSave(actualizado);
+              }}
+              title={form.favorito ? "Quitar de favoritos" : "Marcar como favorito"}
+              style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex" }}
+            >
+              <Star size={18} color={form.favorito ? WARN : MUTED} fill={form.favorito ? WARN : "none"} />
+            </button>
           </div>
           <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: MUTED }}>
             <X size={20} />
@@ -1822,6 +1839,13 @@ function OpportunityModal({ initial, onClose, onSave, onDelete, acciones, onAddA
 
           <Field label="Ciudad"><TextInput placeholder="Ciudad" value={form.ciudad} onChange={set("ciudad")} /></Field>
           <Field label="Teléfono"><TextInput placeholder="999 000 0000" value={form.telefono} onChange={set("telefono")} /></Field>
+
+          <Field label="Alcance">
+            <Select value={form.alcance} onChange={set("alcance")}>
+              {CRM_ALCANCE.map((a) => <option key={a}>{a}</option>)}
+            </Select>
+          </Field>
+          <div />
 
           <Field label="Modelo / detalle (opcional)"><TextInput placeholder="Ej. C2005, 15 m²" value={form.modelo} onChange={set("modelo")} /></Field>
           <Field label="Valor estimado"><TextInput type="number" min="0" placeholder="0.00" value={form.valorEstimado} onChange={set("valorEstimado")} /></Field>
@@ -2021,12 +2045,18 @@ function CRMCard({ op, onEdit, onDragStart }) {
         </div>
       )}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 6 }}>
-        <div style={{ fontWeight: 700, fontSize: 12.5, color: INK }}>{op.cliente}</div>
+        <div style={{ fontWeight: 700, fontSize: 12.5, color: INK, display: "flex", alignItems: "center", gap: 4 }}>
+          {op.favorito && <Star size={12} color={WARN} fill={WARN} />}
+          {op.cliente}
+        </div>
         <Pill color={CRM_PRIORIDAD_COLOR[op.prioridad]} style={{ fontSize: 10, padding: "2px 7px", flexShrink: 0 }}>{op.prioridad}</Pill>
       </div>
-      {(op.empresa || op.ciudad) && (
-        <div style={{ fontSize: 11, color: MUTED, display: "flex", alignItems: "center", gap: 4 }}>
+      {(op.empresa || op.ciudad || op.alcance) && (
+        <div style={{ fontSize: 11, color: MUTED, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
           {op.ciudad && <><MapPin size={11} />{op.ciudad}</>}{op.empresa ? ` · ${op.empresa}` : ""}
+          {op.alcance && (
+            <Pill color={CRM_ALCANCE_COLOR[op.alcance]} style={{ fontSize: 9.5, padding: "1px 6px" }}>{op.alcance}</Pill>
+          )}
         </div>
       )}
       {op.telefono && (
@@ -2133,6 +2163,7 @@ export default function App() {
   const [searchCRM, setSearchCRM] = useState("");
   const [crmFiltroEtapa, setCrmFiltroEtapa] = useState("");
   const [crmFiltroPrioridad, setCrmFiltroPrioridad] = useState("");
+  const [crmSoloFavoritos, setCrmSoloFavoritos] = useState(false);
   const [crmOrden, setCrmOrden] = useState("urgencia"); // 'urgencia' | 'valor' | 'cliente'
   const [searchClientes, setSearchClientes] = useState("");
 
@@ -3144,8 +3175,18 @@ export default function App() {
                     <option value="valor">Ordenar: mayor valor primero</option>
                     <option value="cliente">Ordenar: cliente (A-Z)</option>
                   </Select>
-                  {(crmFiltroEtapa || crmFiltroPrioridad) && (
-                    <Button size="sm" variant="ghost" onClick={() => { setCrmFiltroEtapa(""); setCrmFiltroPrioridad(""); }}>Quitar filtros</Button>
+                  <button
+                    onClick={() => setCrmSoloFavoritos((v) => !v)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, border: `1px solid ${crmSoloFavoritos ? WARN : LINE}`,
+                      background: crmSoloFavoritos ? `${WARN}12` : "#fff", color: crmSoloFavoritos ? WARN : MUTED,
+                      borderRadius: 9, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    <Star size={14} fill={crmSoloFavoritos ? WARN : "none"} /> Solo favoritos
+                  </button>
+                  {(crmFiltroEtapa || crmFiltroPrioridad || crmSoloFavoritos) && (
+                    <Button size="sm" variant="ghost" onClick={() => { setCrmFiltroEtapa(""); setCrmFiltroPrioridad(""); setCrmSoloFavoritos(false); }}>Quitar filtros</Button>
                   )}
                 </div>
               <Card style={{ overflow: "hidden" }}>
@@ -3153,7 +3194,7 @@ export default function App() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                     <thead>
                       <tr style={{ background: PAPER, textAlign: "left" }}>
-                        {["Cliente", "Empresa / Ciudad", "Teléfono", "Modelo", "Valor", "Etapa", "Próxima acción", "Prioridad", "Seg."].map((h) => (
+                        {["Cliente", "Empresa / Ciudad", "Alcance", "Teléfono", "Modelo", "Valor", "Etapa", "Próxima acción", "Prioridad", "Seg."].map((h) => (
                           <th key={h} style={{ padding: "9px 10px", fontSize: 10.5, color: MUTED, fontWeight: 700, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                         ))}
                       </tr>
@@ -3162,6 +3203,7 @@ export default function App() {
                       {oportunidadesFiltradas
                         .filter((o) => !crmFiltroEtapa || o.etapa === crmFiltroEtapa)
                         .filter((o) => !crmFiltroPrioridad || o.prioridad === crmFiltroPrioridad)
+                        .filter((o) => !crmSoloFavoritos || o.favorito)
                         .sort((a, b) => {
                           if (crmOrden === "valor") return (Number(b.valorEstimado) || 0) - (Number(a.valorEstimado) || 0);
                           if (crmOrden === "cliente") return (a.cliente || "").localeCompare(b.cliente || "");
@@ -3178,8 +3220,14 @@ export default function App() {
                           onClick={() => setCrmModal({ mode: "edit", data: o })}
                           style={{ borderTop: `1px solid ${LINE}`, cursor: "pointer" }}
                         >
-                          <td style={{ padding: "8px 10px", fontWeight: 600 }}>{o.cliente}</td>
+                          <td style={{ padding: "8px 10px", fontWeight: 600 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              {o.favorito && <Star size={12} color={WARN} fill={WARN} />}
+                              {o.cliente}
+                            </div>
+                          </td>
                           <td style={{ padding: "8px 10px", color: MUTED }}>{[o.empresa, o.ciudad].filter(Boolean).join(" · ") || "—"}</td>
+                          <td style={{ padding: "8px 10px" }}><Pill color={CRM_ALCANCE_COLOR[o.alcance] || MUTED}>{o.alcance || "Local"}</Pill></td>
                           <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{o.telefono || "—"}</td>
                           <td style={{ padding: "8px 10px" }}>{o.modelo || "—"}</td>
                           <td style={{ padding: "8px 10px", fontWeight: 600, whiteSpace: "nowrap" }}>{Number(o.valorEstimado) > 0 ? fmtMoney(o.valorEstimado) : "—"}</td>
